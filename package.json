@@ -1,0 +1,21 @@
+{
+  "name": "@git-lfs-hub/auth",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test-coverage": "vitest run --coverage"
+  },
+  "packageManager": "bun@1.3.13",
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "jose": "^6.2.3"
+  },
+  "devDependencies": {
+    "@vitest/coverage-istanbul": "^4.1.7",
+    "vitest": "^4.1.7"
+  }
+}

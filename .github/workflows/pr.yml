@@ -1,0 +1,20 @@
+name: PR
+
+on:
+  pull_request:
+  workflow_dispatch: # Can run manually from the Actions tab
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions: { contents: read, pull-requests: write }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: git-lfs-hub/ci-cd/actions/init-bun@main
+
+      - run: bun run test-coverage
+
+      - uses: git-lfs-hub/ci-cd/actions/coverage-report@main

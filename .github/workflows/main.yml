@@ -1,0 +1,27 @@
+name: Main
+
+on:
+  push: { branches: [main] }
+  workflow_dispatch: # Can run manually from the Actions tab
+
+permissions: {}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: git-lfs-hub/ci-cd/actions/init-bun@main
+
+      - run: bun run test-coverage
+
+      - uses: git-lfs-hub/ci-cd/actions/coverage-artifact@main
+
+  coverage-deploy:
+    name: Coverage
+    needs: test
+    uses: git-lfs-hub/ci-cd/.github/workflows/coverage-deploy.yml@main
+    permissions: { contents: read, pages: write, id-token: write }
