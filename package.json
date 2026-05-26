@@ -6,6 +6,8 @@
     "./auth": "./src/auth/index.ts",
     "./auth/session": "./src/auth/session.ts",
     "./github": "./src/github/index.ts"
+    "./github": "./src/github/index.ts",
+    "./contracts": "./src/contracts/index.ts"
   },
   "scripts": {
     "compile": "tsgo --noEmit",
