@@ -22,28 +22,19 @@ bun install
 
 ## API
 
-### `oauth.ts`
+Import from `@git-lfs-hub/lib/auth` (see `src/auth/index.ts`). Other entry points: `@git-lfs-hub/lib/github`.
 
-GitHub OAuth flow helpers.
+### OAuth
 
-- **`signState(payload, secret, ttl?)`** — signs a state token (HS256 JWT) sealing the loopback `redirect_uri` and `client_state` for the callback round-trip.
-- **`verifyState(token, secret)`** → `StatePayload | null` — verifies and decodes a signed state token.
-- **`buildAuthorizeUrl(clientId, redirectUri, state, opts?)`** → URL string — builds the `https://github.com/login/oauth/authorize` redirect URL.
-- **`exchangeCode(clientId, clientSecret, code, redirectUri)`** → `Record<string, string>` — POSTs to GitHub's token endpoint and returns the parsed JSON body.
+- **`githubOAuthUrl(opts)`** → URL string — signs state and builds the `https://github.com/login/oauth/authorize` redirect URL.
+- **`verifyState(token, secret)`** → `StatePayload | null` — verifies the signed state JWT from the callback.
+- **`oauthCallback(opts)`** — exchanges the GitHub code; returns `encrypted` (session cookie), `tokenPayload`, and `statePayload`. Callers pass the result to `oauthSuccessUrl(result, secret)` to mint the loopback redirect, or to `oauthErrorUrl(result)` on failure.
 
-### `session.ts`
+### Session
 
-JWE session token helpers.
-
-- **`encryptSession(payload, secret, ttl?)`** → JWE string (AES-256-GCM) — encrypts a `SessionPayload` (`token`, optional `refresh_token`). Used for both session cookies and short-lived ephemeral codes.
-- **`decryptSession(token, secret)`** → `SessionPayload | null` — decrypts a JWE session token.
-- **`validateSession(cookie, secret)`** → `Session | null` — decrypts the cookie, calls `users.getAuthenticated` to resolve the GitHub username, returns `{ token, username }` or null on any failure.
-
-### `membership.ts`
-
-GitHub org role check.
-
-- **`checkOrgRole(token, org)`** → `"admin" | "member" | null` — checks the authenticated user's org membership role; returns null if not an active member or on any error.
+- **`SESSION_COOKIE`**, **`SESSION_COOKIE_OPTIONS`**, **`SESSION_TTL`** — cookie name and options for `gh_session_v2`.
+- **`encryptSession(payload, secret, ttl?)`** → JWE (AES-256-GCM) — session cookies and short-lived ephemeral codes.
+- **`decryptSession(token, secret)`** → `SessionPayload | null`.
 
 ## Key format
 
