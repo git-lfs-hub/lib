@@ -1,4 +1,4 @@
-# Git LFS Hub — auth
+# Git LFS Hub — lib
 
 [![CI][ci-badge]][gh-wf-href]
 [![Coverage][coverage-badge]][coverage-href]
@@ -47,17 +47,17 @@ bun install
 bun run test      # vitest (node environment)
 ```
 
-[ci-badge]: https://badgen.net/github/checks/git-lfs-hub/auth/main?icon=vitest&label=CI
-[gh-wf-href]: https://github.com/git-lfs-hub/auth/actions/workflows/main.yml?query=branch%3Amain
+[ci-badge]: https://badgen.net/github/checks/git-lfs-hub/lib/main?icon=vitest&label=CI
+[gh-wf-href]: https://github.com/git-lfs-hub/lib/actions/workflows/main.yml?query=branch%3Amain
 
-[coverage-badge]: https://badgen.net/https/git-lfs-hub.github.io/auth/coverage-badge.json?icon=vitest
-[coverage-href]: https://git-lfs-hub.github.io/auth/lcov-report/
+[coverage-badge]: https://badgen.net/https/git-lfs-hub.github.io/lib/coverage-badge.json?icon=vitest
+[coverage-href]: https://git-lfs-hub.github.io/lib/lcov-report/
 
-[codeql-badge]: https://github.com/git-lfs-hub/auth/actions/workflows/github-code-scanning/codeql/badge.svg
-[codeql-href]: https://github.com/git-lfs-hub/auth/actions/workflows/github-code-scanning/codeql?query=branch%3Amain
+[codeql-badge]: https://github.com/git-lfs-hub/lib/actions/workflows/github-code-scanning/codeql/badge.svg
+[codeql-href]: https://github.com/git-lfs-hub/lib/actions/workflows/github-code-scanning/codeql?query=branch%3Amain
 
 [socket-badge]: https://badgen.net/static/Socket/report/blue?icon=socket
-[socket-href]: https://socket.dev/dashboard/org/git-lfs-hub/repo/@git-lfs-hub/auth
+[socket-href]: https://socket.dev/dashboard/org/git-lfs-hub/repo/@git-lfs-hub/lib
 
-[license-badge]: https://badgen.net/github/license/git-lfs-hub/auth
+[license-badge]: https://badgen.net/github/license/git-lfs-hub/lib
 [license-href]: LICENSE.md
