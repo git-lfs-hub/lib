@@ -1,9 +1,11 @@
 {
-  "name": "@git-lfs-hub/auth",
+  "name": "@git-lfs-hub/lib",
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    "./auth": "./src/auth/index.ts",
+    "./auth/session": "./src/auth/session.ts",
+    "./github": "./src/github/index.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -12,6 +14,7 @@
   "packageManager": "bun@1.3.13",
   "dependencies": {
     "@octokit/rest": "^22.0.1",
+    "hono": "^4.12.23",
     "jose": "^6.2.3"
   },
   "devDependencies": {

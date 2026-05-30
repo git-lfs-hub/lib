@@ -1,21 +1,46 @@
 import { EncryptJWT, jwtDecrypt } from "jose";
-import { Octokit } from "@octokit/rest";
+import type { Context } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import { keyBytes } from "./_key";
+
+export const SESSION_COOKIE = "gh_session_v2";
+export const SESSION_TTL = 86400; // 1 day
+
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: true,
+  path: "/",
+  maxAge: SESSION_TTL,
+};
 
 export interface SessionPayload {
   token: string;
   refresh_token?: string;
 }
 
-export interface Session {
-  token: string;
-  username: string;
+export async function setSessionCookie(
+  c: Context,
+  payload: SessionPayload,
+  secret: string,
+): Promise<void> {
+  const value = await encryptSession(payload, secret, SESSION_TTL);
+  setCookie(c, SESSION_COOKIE, value, SESSION_COOKIE_OPTIONS);
+}
+
+export async function getSessionCookie(
+  c: Context,
+  secret: string,
+): Promise<SessionPayload | null> {
+  const raw = getCookie(c, SESSION_COOKIE);
+  if (!raw) return null;
+  return decryptSession(raw, secret);
 }
 
 export async function encryptSession(
   payload: SessionPayload,
   secret: string,
-  ttlSeconds = 300,
+  ttlSeconds: number,
 ): Promise<string> {
   return new EncryptJWT({ ...payload })
     .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
@@ -25,7 +50,7 @@ export async function encryptSession(
 
 export async function decryptSession(
   token: string,
-  secret: string,
+  secret?: string,
 ): Promise<SessionPayload | null> {
   try {
     const { payload } = await jwtDecrypt(token, keyBytes(secret));
@@ -36,20 +61,4 @@ export async function decryptSession(
   } catch {
     return null;
   }
-}
-
-export async function validateSession(
-  cookie: string | undefined,
-  secret: string,
-): Promise<Session | null> {
-  if (!cookie) return null;
-  const payload = await decryptSession(cookie, secret);
-  if (!payload) return null;
-  const octokit = new Octokit({ auth: payload.token });
-  const username = await octokit.rest.users
-    .getAuthenticated()
-    .then(({ data }) => data.login)
-    .catch(() => null);
-  if (!username) return null;
-  return { token: payload.token, username };
 }
