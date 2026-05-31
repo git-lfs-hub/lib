@@ -3,9 +3,29 @@ import { generateKeyPair, exportPKCS8, jwtVerify } from "jose";
 import { GithubApi } from "./api";
 import { GithubOrgApi } from "./api-org";
 import { GithubError, mapHttpError } from "./errors";
+import type { KvStore } from "../cache";
 
 function api(octokit: any): GithubApi {
   const a = new GithubApi("t");
+  (a as { octokit: unknown }).octokit = octokit;
+  return a;
+}
+
+/** In-memory KV fake. */
+function fakeKv() {
+  const store = new Map<string, string>();
+  const kv = {
+    get: (k: string) => Promise.resolve(store.get(k) ?? null),
+    put: (k: string, v: string) => {
+      store.set(k, v);
+      return Promise.resolve();
+    },
+  } as unknown as KvStore;
+  return { kv, store };
+}
+
+function cachedApi(octokit: any, kv: KvStore): GithubApi {
+  const a = new GithubApi("t", kv);
   (a as { octokit: unknown }).octokit = octokit;
   return a;
 }
@@ -256,6 +276,117 @@ describe("listRepos", () => {
     await expect(async () => {
       for await (const _ of o.listRepos()) { /* drain */ }
     }).rejects.toMatchObject({ code: "missing", status: 404 });
+  });
+});
+
+describe("cache", () => {
+  test("authenticatedUsername caches login; second call skips Octokit", async () => {
+    const { kv } = fakeKv();
+    const getAuthenticated = vi.fn(() => Promise.resolve({ data: { login: "alice" } }));
+    const a = cachedApi({ rest: { users: { getAuthenticated } } }, kv);
+    expect(await a.authenticatedUsername()).toBe("alice");
+    expect(await a.authenticatedUsername()).toBe("alice");
+    expect(getAuthenticated).toHaveBeenCalledTimes(1);
+  });
+
+  test("failed auth is not cached", async () => {
+    const { kv, store } = fakeKv();
+    const a = cachedApi(
+      { rest: { users: { getAuthenticated: () => Promise.reject(new Error("401")) } } },
+      kv,
+    );
+    expect(await a.authenticatedUsername()).toBeNull();
+    expect(store.size).toBe(0);
+  });
+
+  test("orgRole caches role; second call skips Octokit", async () => {
+    const { kv } = fakeKv();
+    const getMembershipForAuthenticatedUser = vi.fn(() =>
+      Promise.resolve({ data: { state: "active", role: "member" } }),
+    );
+    const a = cachedApi(
+      {
+        rest: {
+          users: { getAuthenticated: () => Promise.resolve({ data: { login: "alice" } }) },
+          orgs: { getMembershipForAuthenticatedUser },
+        },
+      },
+      kv,
+    );
+    expect(await a.orgRole("acme")).toBe("member");
+    expect(await a.orgRole("acme")).toBe("member");
+    expect(getMembershipForAuthenticatedUser).toHaveBeenCalledTimes(1);
+  });
+
+  test("inactive membership is not cached", async () => {
+    const { kv, store } = fakeKv();
+    const a = cachedApi(
+      {
+        rest: {
+          users: { getAuthenticated: () => Promise.resolve({ data: { login: "alice" } }) },
+          orgs: {
+            getMembershipForAuthenticatedUser: () =>
+              Promise.resolve({ data: { state: "pending", role: "member" } }),
+          },
+        },
+      },
+      kv,
+    );
+    expect(await a.orgRole("acme")).toBeNull();
+    expect(store.has("alice:acme:access")).toBe(false);
+  });
+
+  test("repoAccess caches access; second call skips Octokit", async () => {
+    const { kv } = fakeKv();
+    const get = vi.fn(() => Promise.resolve({ data: { permissions: { push: true } } }));
+    const a = cachedApi(
+      {
+        rest: {
+          users: { getAuthenticated: () => Promise.resolve({ data: { login: "alice" } }) },
+          repos: { get },
+        },
+      },
+      kv,
+    );
+    expect(await a.repoAccess("acme", "hub")).toBe("write");
+    expect(await a.repoAccess("acme", "hub")).toBe("write");
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  test("no repo access is not cached", async () => {
+    const { kv, store } = fakeKv();
+    const a = cachedApi(
+      {
+        rest: {
+          users: { getAuthenticated: () => Promise.resolve({ data: { login: "alice" } }) },
+          repos: { get: () => Promise.reject(new Error("404")) },
+        },
+      },
+      kv,
+    );
+    expect(await a.repoAccess("acme", "hub")).toBeNull();
+    expect(store.has("alice:acme/hub:access")).toBe(false);
+  });
+
+  test("username resolved once across orgRole and repoAccess", async () => {
+    const { kv } = fakeKv();
+    const getAuthenticated = vi.fn(() => Promise.resolve({ data: { login: "alice" } }));
+    const a = cachedApi(
+      {
+        rest: {
+          users: { getAuthenticated },
+          orgs: {
+            getMembershipForAuthenticatedUser: () =>
+              Promise.resolve({ data: { state: "active", role: "admin" } }),
+          },
+          repos: { get: () => Promise.resolve({ data: { permissions: { pull: true } } }) },
+        },
+      },
+      kv,
+    );
+    await a.orgRole("acme");
+    await a.repoAccess("acme", "hub");
+    expect(getAuthenticated).toHaveBeenCalledTimes(1);
   });
 });
 
