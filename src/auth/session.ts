@@ -49,17 +49,23 @@ export async function getSessionCookie(
   c: Context,
   secret: string,
 ): Promise<SessionTokens | null> {
-  const accessRaw = getCookie(c, ACCESS_COOKIE);
-  if (accessRaw) {
-    const accessClaims = await decryptClaims(accessRaw, secret);
-    const access = ifString(accessClaims?.access);
-    if (!access) return null;
-    const refreshRaw = getCookie(c, REFRESH_COOKIE);
-    const refreshClaims = refreshRaw ? await decryptClaims(refreshRaw, secret) : null;
-    return { access, refresh: ifString(refreshClaims?.refresh) };
+  const access = await getCookieToken(c, ACCESS_COOKIE, "access", secret);
+  if (access) {
+    return { access, refresh: await getCookieToken(c, REFRESH_COOKIE, "refresh", secret) };
   }
   const legacy = getCookie(c, LEGACY_COOKIE); // monolithic v2, read-only
   return legacy ? decryptSession(legacy, secret) : null;
+}
+
+async function getCookieToken(
+  c: Context,
+  cookieName: string,
+  field: string,
+  secret: string,
+): Promise<string | undefined> {
+  const cookie = getCookie(c, cookieName);
+  const claims = cookie ? await decryptClaims(cookie, secret) : null;
+  return ifString(claims?.[field]);
 }
 
 // --- monolithic encode/decode: ephemeral OAuth code + legacy v2 cookie ---

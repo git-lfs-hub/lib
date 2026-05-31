@@ -122,6 +122,18 @@ describe("resolveSession", () => {
     expect(await res.json()).toBeNull();
   });
 
+  test("returns null when the refreshed token is also unauthorized", async () => {
+    const cookie = await cookieFor("/set");
+    mockFetchSequence([
+      githubUnauthorized(),
+      oauthRefresh({ access_token: "ghu_new", refresh_token: "ghr_new" }),
+      githubUnauthorized(),
+    ]);
+    const res = await app().request("/resolve", { headers: { Cookie: cookie } });
+    expect(await res.json()).toBeNull();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  });
+
   test("returns null when access is stale and there is no refresh", async () => {
     const cookie = await cookieFor("/set-no-refresh");
     mockFetchSequence([githubUnauthorized()]);
