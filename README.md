@@ -27,14 +27,20 @@ Import from `@git-lfs-hub/lib/auth` (see `src/auth/index.ts`). Other entry point
 ### OAuth
 
 - **`githubOAuthUrl(opts)`** → URL string — signs state and builds the `https://github.com/login/oauth/authorize` redirect URL.
-- **`verifyState(token, secret)`** → `StatePayload | null` — verifies the signed state JWT from the callback.
-- **`oauthCallback(opts)`** — exchanges the GitHub code; returns `encrypted` (session cookie), `tokenPayload`, and `statePayload`. Callers pass the result to `oauthSuccessUrl(result, secret)` to mint the loopback redirect, or to `oauthErrorUrl(result)` on failure.
+- **`verifyState(token, secret)`** → `OAuthState | null` — verifies the signed state JWT from the callback.
+- **`oauthCallback(opts)`** → `OAuthCallbackResult` — exchanges the GitHub code. On success `{ ok: true, tokens, state }`; on failure `{ ok: false, error, state? }`. Callers pass `oauthSuccessUrl(tokens, state, secret)` to mint the loopback redirect, or `oauthErrorUrl(state, error)` on failure.
 
 ### Session
 
-- **`ACCESS_COOKIE`**, **`ACCESS_COOKIE_OPTIONS`**, **`SESSION_TTL`** — cookie name and options for `gh_session_v2`.
-- **`encryptSession(payload, secret, ttl?)`** → JWE (AES-256-GCM) — session cookies and short-lived ephemeral codes.
-- **`decryptSession(token, secret)`** → `SessionPayload | null`.
+Tokens live in two independent cookies; `gh_session_v2` is read-only legacy, migrated on next write.
+
+- **`ACCESS_COOKIE`** (`gh_access`, TTL **`ACCESS_TTL`** = 1d), **`REFRESH_COOKIE`** (`gh_refresh`, TTL **`REFRESH_TTL`** = 180d), **`LEGACY_COOKIE`** (`gh_session_v2`, read-only).
+- **`setSessionCookie(c, tokens, secret)`** — writes the split access + refresh cookies, evicts the legacy monolith.
+- **`getSessionCookie(c, secret)`** → `SessionTokens | null` — reads the split cookies, falling back to the legacy monolith.
+- **`resolveSession(c, opts)`** → `{ api, username } | null` — resolves the GitHub identity, refreshing and re-setting cookies on an access-token miss.
+- **`encryptSession(tokens, secret, ttl?)`** → JWE (AES-256-GCM) / **`decryptSession(token, secret)`** → `SessionTokens | null` — monolithic encode/decode for ephemeral OAuth codes and legacy cookies.
+
+`SessionTokens` is `{ access: string; refresh?: string }` (the GitHub wire `access_token`/`refresh_token` names are kept only at the GitHub and CLI boundaries).
 
 ## Key format
 
