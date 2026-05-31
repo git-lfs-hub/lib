@@ -32,7 +32,7 @@ Import from `@git-lfs-hub/lib/auth` (see `src/auth/index.ts`). Other entry point
 
 ### Session
 
-- **`SESSION_COOKIE`**, **`SESSION_COOKIE_OPTIONS`**, **`SESSION_TTL`** — cookie name and options for `gh_session_v2`.
+- **`ACCESS_COOKIE`**, **`ACCESS_COOKIE_OPTIONS`**, **`SESSION_TTL`** — cookie name and options for `gh_session_v2`.
 - **`encryptSession(payload, secret, ttl?)`** → JWE (AES-256-GCM) — session cookies and short-lived ephemeral codes.
 - **`decryptSession(token, secret)`** → `SessionPayload | null`.
 

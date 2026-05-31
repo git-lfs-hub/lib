@@ -6,7 +6,7 @@ import {
   oauthErrorUrl,
   oauthSuccessUrl,
   oauthCallback,
-  type StatePayload,
+  type OAuthState,
 } from "./oauth";
 import { decryptSession } from "./session";
 import { githubAccessToken } from "../github/accessToken";
@@ -14,7 +14,7 @@ import { githubAccessToken } from "../github/accessToken";
 const SECRET = "a".repeat(64);
 const OTHER_SECRET = "b".repeat(64);
 
-const STATE: StatePayload = {
+const STATE: OAuthState = {
   redirect_uri: "http://127.0.0.1:8080/",
   client_state: "abc123",
   scopes: "repo,gist",
@@ -147,44 +147,31 @@ describe("githubAccessToken", () => {
 });
 
 describe("oauthErrorUrl", () => {
-  const fail = (statePayload?: StatePayload) =>
-    ({ ok: false as const, error: "denied", statePayload });
-
   test("appends error and client_state", () => {
-    const url = new URL(oauthErrorUrl(fail(STATE))!);
+    const url = new URL(oauthErrorUrl(STATE, "denied"));
     expect(url.searchParams.get("error")).toBe("denied");
     expect(url.searchParams.get("state")).toBe("abc123");
   });
 
   test("omits client_state when empty", () => {
-    const url = new URL(
-      oauthErrorUrl(fail({ ...STATE, client_state: "" }))!,
-    );
+    const url = new URL(oauthErrorUrl({ ...STATE, client_state: "" }, "denied"));
     expect(url.searchParams.get("error")).toBe("denied");
     expect(url.searchParams.has("state")).toBe(false);
-  });
-
-  test("returns null when statePayload missing", () => {
-    expect(oauthErrorUrl(fail())).toBeNull();
   });
 });
 
 describe("oauthSuccessUrl", () => {
-  const PAYLOAD = { token: "ghu_abc" };
-  const ok = (statePayload: StatePayload) =>
-    ({ ok: true as const, encrypted: "", tokenPayload: PAYLOAD, statePayload });
+  const SESSION = { access: "ghu_abc" };
 
   test("appends code and client_state", async () => {
-    const url = new URL(await oauthSuccessUrl(ok(STATE), SECRET));
+    const url = new URL(await oauthSuccessUrl(SESSION, STATE, SECRET));
     const code = url.searchParams.get("code")!;
-    expect(await decryptSession(code, SECRET)).toEqual(PAYLOAD);
+    expect(await decryptSession(code, SECRET)).toEqual(SESSION);
     expect(url.searchParams.get("state")).toBe("abc123");
   });
 
   test("omits client_state when empty", async () => {
-    const url = new URL(
-      await oauthSuccessUrl(ok({ ...STATE, client_state: "" }), SECRET),
-    );
+    const url = new URL(await oauthSuccessUrl(SESSION, { ...STATE, client_state: "" }, SECRET));
     expect(url.searchParams.get("code")).toBeTruthy();
     expect(url.searchParams.has("state")).toBe(false);
   });
@@ -214,7 +201,7 @@ describe("oauthCallback", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error).toBe("missing_code");
-      expect(r.statePayload).toEqual(STATE);
+      expect(r.state).toEqual(STATE);
     }
   });
 
@@ -244,7 +231,7 @@ describe("oauthCallback", () => {
     spy.mockRestore();
   });
 
-  test("returns ok with tokenPayload and statePayload on success", async () => {
+  test("returns ok with tokens and state on success", async () => {
     const signed = await signState(STATE, SECRET);
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
@@ -255,8 +242,8 @@ describe("oauthCallback", () => {
     const r = await oauthCallback({ ...base, code: "x", state: signed });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.tokenPayload).toEqual({ token: "ghu_abc", refresh_token: "ghr_r" });
-      expect(r.statePayload).toEqual(STATE);
+      expect(r.tokens).toEqual({ access: "ghu_abc", refresh: "ghr_r" });
+      expect(r.state).toEqual(STATE);
     }
     spy.mockRestore();
   });
@@ -270,7 +257,7 @@ describe("oauthCallback", () => {
     );
     const r = await oauthCallback({ ...base, code: "x", state: signed });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.tokenPayload).toEqual({ token: "ghu_abc" });
+    if (r.ok) expect(r.tokens).toEqual({ access: "ghu_abc" });
     spy.mockRestore();
   });
 });
