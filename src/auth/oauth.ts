@@ -1,13 +1,14 @@
 import { SignJWT, jwtVerify } from "jose";
 import { keyBytes } from "./_key";
 import { githubAccessToken } from "../github/accessToken";
-import { encryptSession, type SessionPayload } from "./session";
+import { encryptSession, type SessionTokens } from "./session";
+import { urlWithParams } from "../utils";
 
 const STATE_TTL = 600; // github oauth/authorize
 const EPHEMERAL_CODE_TTL = 300; // loopback OAuth code
 
 /** Sealed in signed OAuth state and recovered on callback. */
-export interface StatePayload {
+export interface OAuthState {
   /** Final client URL (loopback for Git clients). Not the GitHub redirect_uri param. */
   redirect_uri: string;
   /** Opaque value echoed back to the client (`state` query param). */
@@ -20,27 +21,27 @@ export async function githubOAuthUrl(opts: {
   /** Registered callback GitHub redirects to (our /login/oauth/callback). */
   callbackUrl: string;
   secret: string;
-  state: StatePayload;
+  state: OAuthState;
   login?: string;
 }): Promise<string> {
   const signedState = await signState(opts.state, opts.secret);
-  const url = new URL("https://github.com/login/oauth/authorize");
-  url.searchParams.set("client_id", opts.clientId);
-  url.searchParams.set("redirect_uri", opts.callbackUrl);
-  url.searchParams.set("state", signedState);
-  if (opts.state.scopes) url.searchParams.set("scope", opts.state.scopes);
-  if (opts.login) url.searchParams.set("login", opts.login);
-  return url.toString();
+  return urlWithParams("https://github.com/login/oauth/authorize", {
+    client_id: opts.clientId,
+    redirect_uri: opts.callbackUrl,
+    state: signedState,
+    scope: opts.state.scopes,
+    login: opts.login,
+  });
 }
 
-export async function signState(payload: StatePayload, secret: string, ttl = STATE_TTL): Promise<string> {
-  return new SignJWT({ ...payload })
+export async function signState(state: OAuthState, secret: string, ttl = STATE_TTL): Promise<string> {
+  return new SignJWT({ ...state })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime(Math.floor(Date.now() / 1000) + ttl)
     .sign(keyBytes(secret));
 }
 
-export async function verifyState(token: string, secret: string): Promise<StatePayload | null> {
+export async function verifyState(token: string, secret: string): Promise<OAuthState | null> {
   try {
     const { payload } = await jwtVerify(token, keyBytes(secret));
     return {
@@ -56,10 +57,10 @@ export async function verifyState(token: string, secret: string): Promise<StateP
 export type OAuthCallbackResult =
   | {
       ok: true;
-      tokenPayload: SessionPayload;
-      statePayload: StatePayload;
+      tokens: SessionTokens;
+      state: OAuthState;
     }
-  | { ok: false; error: string; statePayload?: StatePayload };
+  | { ok: false; error: string; state?: OAuthState };
 
 export async function oauthCallback(opts: {
   code: string | undefined;
@@ -69,10 +70,10 @@ export async function oauthCallback(opts: {
   clientSecret: string;
   callbackUrl: string;
 }): Promise<OAuthCallbackResult> {
-  const statePayload = opts.state ? await verifyState(opts.state, opts.secret) : null;
-  if (!statePayload) return { ok: false, error: "invalid_state" };
+  const state = opts.state ? await verifyState(opts.state, opts.secret) : null;
+  if (!state) return { ok: false, error: "invalid_state" };
 
-  const fail = (error: string): OAuthCallbackResult => ({ ok: false, error, statePayload });
+  const fail = (error: string): OAuthCallbackResult => ({ ok: false, error, state });
 
   if (!opts.code) return fail("missing_code");
 
@@ -86,31 +87,28 @@ export async function oauthCallback(opts: {
   });
 
   if (data.error || !data.access_token) return fail(data.error ?? "no_token");
-  const tokenPayload: SessionPayload = { token: data.access_token };
-  if (typeof data.refresh_token === "string") tokenPayload.refresh_token = data.refresh_token;
 
-  return { ok: true, tokenPayload, statePayload };
-}
-
-/** Loopback redirect after OAuth failure (`?error=…`). Returns null when state could not be recovered. */
-export function oauthErrorUrl(
-  result: Extract<OAuthCallbackResult, { ok: false }>,
-): string | null {
-  if (!result.statePayload) return null;
-  const url = new URL(result.statePayload.redirect_uri);
-  url.searchParams.set("error", result.error);
-  if (result.statePayload.client_state) url.searchParams.set("state", result.statePayload.client_state);
-  return url.toString();
+  const tokens: SessionTokens = {
+    access: data.access_token,
+    refresh: data.refresh_token,
+  };
+  return { ok: true, tokens, state };
 }
 
 /** Loopback redirect after OAuth success (`?code=…` ephemeral JWE). Server Git-proxy only. */
 export async function oauthSuccessUrl(
-  result: Extract<OAuthCallbackResult, { ok: true }>,
-  secret: string,
+  tokens: SessionTokens,
+  state: OAuthState,
+  secret: string
 ): Promise<string> {
-  const ephemeralCode = await encryptSession(result.tokenPayload, secret, EPHEMERAL_CODE_TTL);
-  const url = new URL(result.statePayload.redirect_uri);
-  url.searchParams.set("code", ephemeralCode);
-  if (result.statePayload.client_state) url.searchParams.set("state", result.statePayload.client_state);
-  return url.toString();
+  const code = await encryptSession(tokens, secret, EPHEMERAL_CODE_TTL);
+  return urlWithParams(state.redirect_uri, { code, state: state.client_state });
+}
+
+/** Loopback redirect after OAuth failure (`?error=…`). Caller must have a recovered state. */
+export function oauthErrorUrl(
+  state: OAuthState,
+  error: string
+): string {
+  return urlWithParams(state.redirect_uri, { error, state: state.client_state });
 }

@@ -8,6 +8,7 @@ export {
   setSessionCookie,
   getSessionCookie,
   decryptSession,
-  type SessionPayload,
+  type SessionTokens,
 } from "./session";
+export { resolveSession } from "./resolve";
 export { authHeaderToken } from "./header";

@@ -11,6 +11,13 @@ Default to using Bun instead of Node.js.
 - Use `bunx <package> <command>` instead of `npx <package> <command>`
 - Bun automatically loads .env, so don't use dotenv.
 
+## Coding
+
+- Group by use cases
+- Main flows first, edge cases and error handling last
+- Callers before called
+- Tests mirror main file order
+
 ## Testing
 
 Use `vitest` to run tests.
