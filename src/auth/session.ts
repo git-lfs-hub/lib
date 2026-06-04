@@ -50,9 +50,8 @@ export async function getSessionCookie(
   secret: string,
 ): Promise<SessionTokens | null> {
   const access = await getCookieToken(c, ACCESS_COOKIE, "access", secret);
-  if (access) {
-    return { access, refresh: await getCookieToken(c, REFRESH_COOKIE, "refresh", secret) };
-  }
+  const refresh = await getCookieToken(c, REFRESH_COOKIE, "refresh", secret);
+  if (access || refresh) return { access: access ?? "", refresh };
   const legacy = getCookie(c, LEGACY_COOKIE); // monolithic v2, read-only
   return legacy ? decryptSession(legacy, secret) : null;
 }

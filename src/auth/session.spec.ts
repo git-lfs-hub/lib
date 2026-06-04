@@ -116,6 +116,14 @@ describe("setSessionCookie / getSessionCookie", () => {
     expect(await getRes.json()).toEqual({ access: "ghu_a" });
   });
 
+  test("returns refresh-only session when the access cookie is gone", async () => {
+    const a = app();
+    const setRes = await a.request("/set-refresh");
+    const refresh = setCookieFor(setRes, REFRESH_COOKIE)!.split(";")[0];
+    const getRes = await a.request("/get", { headers: { Cookie: refresh } });
+    expect(await getRes.json()).toEqual({ access: "", refresh: "ghr_r" });
+  });
+
   test("omits refresh cookie when session has no refresh", async () => {
     const res = await app().request("/set");
     expect(setCookieFor(res, REFRESH_COOKIE)).toBeUndefined();
