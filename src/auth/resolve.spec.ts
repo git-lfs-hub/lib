@@ -4,6 +4,7 @@ import { resolveSession } from "./resolve";
 import {
   setSessionCookie,
   getSessionCookie,
+  REFRESH_COOKIE,
   type SessionTokens,
 } from "./session";
 
@@ -131,6 +132,22 @@ describe("resolveSession", () => {
     ]);
     const res = await app().request("/resolve", { headers: { Cookie: cookie } });
     expect(await res.json()).toBeNull();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  test("refreshes from a refresh-only cookie when the access cookie is gone", async () => {
+    const both = await app().request("/set");
+    const refreshOnly = both.headers
+      .getSetCookie()
+      .map((c) => c.split(";")[0])
+      .find((c) => c.startsWith(`${REFRESH_COOKIE}=`))!;
+    mockFetchSequence([
+      githubUnauthorized(),
+      oauthRefresh({ access_token: "ghu_new", refresh_token: "ghr_new" }),
+      githubUser("alice"),
+    ]);
+    const res = await app().request("/resolve", { headers: { Cookie: refreshOnly } });
+    expect(await res.json()).toEqual({ username: "alice" });
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
   });
 
