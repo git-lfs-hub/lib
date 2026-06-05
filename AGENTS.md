@@ -1,14 +1,11 @@
 # AGENTS.md
 
-## Bun instead of Node
+## Bun script runner and package manager
 
-Default to using Bun instead of Node.js.
-
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
+- `bun <file>`, not `node <file>` or `ts-node <file>`
+- `bun install`, not `npm install` or `yarn install` or `pnpm install`
+- `bun run <script>`, not `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
+- `bunx <package> <command>`, not `npx <package> <command>`
 - Bun automatically loads .env, so don't use dotenv.
 
 ## Coding
