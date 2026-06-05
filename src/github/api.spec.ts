@@ -253,6 +253,7 @@ describe("listRepos", () => {
   });
 
   test("throws GithubError forbidden on 403", async () => {
+    // eslint-disable-next-line require-yield -- async generator that only throws
     const failingIter = async function* () {
       throw Object.assign(new Error("403"), { status: 403 });
     };
@@ -266,6 +267,7 @@ describe("listRepos", () => {
   });
 
   test("throws GithubError missing on 404", async () => {
+    // eslint-disable-next-line require-yield -- async generator that only throws
     const failingIter = async function* () {
       throw Object.assign(new Error("404"), { status: 404 });
     };

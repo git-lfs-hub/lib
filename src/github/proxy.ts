@@ -15,7 +15,7 @@ export async function githubProxyFetch(
   init?: RequestInit,
 ): Promise<Response> {
   const headers = {
-    ...((init?.headers as Record<string, string>) ?? {}),
+    ...(init?.headers as Record<string, string>),
     "User-Agent": USER_AGENT,
   };
   const res = await fetch(url, { ...init, headers });
