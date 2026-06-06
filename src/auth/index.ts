@@ -3,3 +3,4 @@ export { setSessionCookie, getSessionCookie, decryptSession, type SessionTokens 
 export { resolveSession } from './resolve';
 export { requireOrgRole } from './requireOrgRole';
 export { authHeaderToken } from './header';
+export { verifyWebhookSignature } from './webhook';
