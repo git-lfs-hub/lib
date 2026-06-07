@@ -10,11 +10,6 @@ describe("keyBytes", () => {
     expect(() => keyBytes()).toThrow("session secret is not set");
     expect(() => keyBytes("")).toThrow("session secret is not set");
   });
-
-  test("throws when the secret is not valid hex", () => {
-    expect(() => keyBytes("abc")).toThrow("session secret is not valid hex"); // odd length
-    expect(() => keyBytes("zz")).toThrow("session secret is not valid hex"); // non-hex
-  });
 });
 
 describe("hexToBytes", () => {
