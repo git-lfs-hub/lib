@@ -3,6 +3,7 @@ import { SignJWT, importPKCS8 } from 'jose';
 
 import { Cache, type KvStore } from '../cache';
 import type { GithubOrgApi } from './api-org';
+import { isHttpError, mapHttpError } from './errors';
 
 export const USER_AGENT = 'git-lfs-hub';
 
@@ -49,17 +50,24 @@ export class GithubApi {
     return login;
   }
 
+  /**
+   * Active org membership role for the authenticated user, or `null` when the
+   * user is not an active member. Throws GithubError on API failure (e.g.
+   * `forbidden` when the token cannot read org membership).
+   */
   async orgRole(org: string): Promise<'admin' | 'member' | null> {
     return this.withCache(
       () => this.accessKey(org),
-      () =>
-        this.octokit.rest.orgs
-          .getMembershipForAuthenticatedUser({ org })
-          .then(({ data }) => {
-            if (data.state !== 'active') return null;
-            return data.role === 'admin' ? 'admin' : 'member';
-          })
-          .catch(() => null),
+      async () => {
+        try {
+          const { data } = await this.octokit.rest.orgs.getMembershipForAuthenticatedUser({ org });
+          if (data.state !== 'active') return null;
+          return data.role === 'admin' ? 'admin' : 'member';
+        } catch (e) {
+          if (isHttpError(e) && e.status === 404) return null;
+          throw mapHttpError(e, `getMembershipForAuthenticatedUser for ${org}`);
+        }
+      },
     );
   }
 

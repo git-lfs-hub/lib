@@ -61,13 +61,21 @@ describe('authenticatedUsername', () => {
   });
 });
 
-function membershipApi(impl: { state?: string; role?: 'admin' | 'member'; reject?: boolean }) {
+function membershipApi(impl: {
+  state?: string;
+  role?: 'admin' | 'member';
+  reject?: number | boolean;
+}) {
   return api({
     rest: {
       orgs: {
         getMembershipForAuthenticatedUser: () =>
           impl.reject
-            ? Promise.reject(new Error('404'))
+            ? Promise.reject(
+                Object.assign(new Error(String(impl.reject)), {
+                  status: impl.reject === true ? 404 : impl.reject,
+                }),
+              )
             : Promise.resolve({ data: { state: impl.state, role: impl.role } }),
       },
     },
@@ -89,8 +97,15 @@ describe('orgRole', () => {
     expect(await membershipApi({ state: 'pending', role: 'member' }).orgRole('my-org')).toBeNull();
   });
 
-  test('returns null when API errors (not a member)', async () => {
-    expect(await membershipApi({ reject: true }).orgRole('my-org')).toBeNull();
+  test('returns null when API errors with 404', async () => {
+    expect(await membershipApi({ reject: 404 }).orgRole('my-org')).toBeNull();
+  });
+
+  test('throws GithubError forbidden when API errors with 403', async () => {
+    await expect(membershipApi({ reject: 403 }).orgRole('my-org')).rejects.toMatchObject({
+      code: 'forbidden',
+      status: 403,
+    });
   });
 });
 
