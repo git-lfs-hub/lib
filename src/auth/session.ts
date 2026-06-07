@@ -1,21 +1,22 @@
-import { EncryptJWT, jwtDecrypt } from "jose";
-import type { Context } from "hono";
-import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { keyBytes } from "./_key";
-import { ifString } from "../utils";
+import type { Context } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import { EncryptJWT, jwtDecrypt } from 'jose';
 
-export const ACCESS_COOKIE = "gh_access"; // access only
-export const REFRESH_COOKIE = "gh_refresh"; // refresh only
-export const LEGACY_COOKIE = "gh_session_v2"; // monolithic, read-only
+import { ifString } from '../utils';
+import { keyBytes } from './_key';
+
+export const ACCESS_COOKIE = 'gh_access'; // access only
+export const REFRESH_COOKIE = 'gh_refresh'; // refresh only
+export const LEGACY_COOKIE = 'gh_session_v2'; // monolithic, read-only
 
 export const ACCESS_TTL = 86400; // 1 day
 export const REFRESH_TTL = 15552000; // 180 day — GitHub refresh-token lifetime
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  sameSite: "lax" as const,
+  sameSite: 'lax' as const,
   secure: true,
-  path: "/",
+  path: '/',
 };
 
 export interface SessionTokens {
@@ -29,12 +30,10 @@ export async function setSessionCookie(
   tokens: SessionTokens,
   secret: string,
 ): Promise<void> {
-  setCookie(
-    c,
-    ACCESS_COOKIE,
-    await encryptClaims({ access: tokens.access }, secret, ACCESS_TTL),
-    { ...COOKIE_OPTIONS, maxAge: ACCESS_TTL },
-  );
+  setCookie(c, ACCESS_COOKIE, await encryptClaims({ access: tokens.access }, secret, ACCESS_TTL), {
+    ...COOKIE_OPTIONS,
+    maxAge: ACCESS_TTL,
+  });
   if (tokens.refresh)
     setCookie(
       c,
@@ -42,16 +41,13 @@ export async function setSessionCookie(
       await encryptClaims({ refresh: tokens.refresh }, secret, REFRESH_TTL),
       { ...COOKIE_OPTIONS, maxAge: REFRESH_TTL },
     );
-  deleteCookie(c, LEGACY_COOKIE, { path: "/" }); // evict monolith on migration
+  deleteCookie(c, LEGACY_COOKIE, { path: '/' }); // evict monolith on migration
 }
 
-export async function getSessionCookie(
-  c: Context,
-  secret: string,
-): Promise<SessionTokens | null> {
-  const access = await getCookieToken(c, ACCESS_COOKIE, "access", secret);
-  const refresh = await getCookieToken(c, REFRESH_COOKIE, "refresh", secret);
-  if (access || refresh) return { access: access ?? "", refresh };
+export async function getSessionCookie(c: Context, secret: string): Promise<SessionTokens | null> {
+  const access = await getCookieToken(c, ACCESS_COOKIE, 'access', secret);
+  const refresh = await getCookieToken(c, REFRESH_COOKIE, 'refresh', secret);
+  if (access || refresh) return { access: access ?? '', refresh };
   const legacy = getCookie(c, LEGACY_COOKIE); // monolithic v2, read-only
   return legacy ? decryptSession(legacy, secret) : null;
 }
@@ -93,7 +89,7 @@ async function encryptClaims(
   ttlSeconds: number,
 ): Promise<string> {
   return new EncryptJWT({ ...claims })
-    .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+    .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
     .setExpirationTime(Math.floor(Date.now() / 1000) + ttlSeconds)
     .encrypt(keyBytes(secret));
 }

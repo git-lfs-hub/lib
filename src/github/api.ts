@@ -1,15 +1,16 @@
-import { Octokit } from "@octokit/rest";
-import { SignJWT, importPKCS8 } from "jose";
-import type { GithubOrgApi } from "./api-org";
-import { Cache, type KvStore } from "../cache";
+import { Octokit } from '@octokit/rest';
+import { SignJWT, importPKCS8 } from 'jose';
 
-export const USER_AGENT = "git-lfs-hub";
+import { Cache, type KvStore } from '../cache';
+import type { GithubOrgApi } from './api-org';
 
-export type RepoAccess = "read" | "write";
+export const USER_AGENT = 'git-lfs-hub';
+
+export type RepoAccess = 'read' | 'write';
 
 const CACHE_TTL = {
-  ":user": 86400, // token -> user 1 day
-  ":access": 300  // user -> access 5 min
+  ':user': 86400, // token -> user 1 day
+  ':access': 300, // user -> access 5 min
 };
 
 export class GithubApi {
@@ -30,7 +31,7 @@ export class GithubApi {
 
   async orgApi(org: string): Promise<GithubOrgApi> {
     // Dynamic import breaks the api ↔ api-org cycle.
-    const { GithubOrgApi } = await import("./api-org");
+    const { GithubOrgApi } = await import('./api-org');
     return GithubOrgApi.forAppOrg(this, org);
   }
 
@@ -38,37 +39,40 @@ export class GithubApi {
     if (this.cachedUsername) return this.cachedUsername;
     const login = await this.withCache(
       () => this.userKey(),
-      () => this.octokit.rest.users
-        .getAuthenticated()
-        .then(({ data }) => data.login)
-        .catch(() => null),
+      () =>
+        this.octokit.rest.users
+          .getAuthenticated()
+          .then(({ data }) => data.login)
+          .catch(() => null),
     );
     if (login) this.cachedUsername = login;
     return login;
   }
 
-  async orgRole(org: string): Promise<"admin" | "member" | null> {
+  async orgRole(org: string): Promise<'admin' | 'member' | null> {
     return this.withCache(
       () => this.accessKey(org),
-      () => this.octokit.rest.orgs
-        .getMembershipForAuthenticatedUser({ org })
-        .then(({ data }) => {
-          if (data.state !== "active") return null;
-          return data.role === "admin" ? "admin" : "member";
-        })
-        .catch(() => null),
+      () =>
+        this.octokit.rest.orgs
+          .getMembershipForAuthenticatedUser({ org })
+          .then(({ data }) => {
+            if (data.state !== 'active') return null;
+            return data.role === 'admin' ? 'admin' : 'member';
+          })
+          .catch(() => null),
     );
   }
 
   async repoAccess(owner: string, repo: string): Promise<RepoAccess | null> {
     return this.withCache(
       () => this.accessKey(`${owner}/${repo}`),
-      () => this.octokit.rest.repos
-        .get({ owner, repo })
-        .then(({ data }) =>
-          data.permissions?.push || data.permissions?.admin ? "write" : "read",
-        )
-        .catch(() => null),
+      () =>
+        this.octokit.rest.repos
+          .get({ owner, repo })
+          .then(({ data }) =>
+            data.permissions?.push || data.permissions?.admin ? 'write' : 'read',
+          )
+          .catch(() => null),
     );
   }
 
@@ -89,8 +93,8 @@ export class GithubApi {
 
   /** `{hash}:user` key (SHA-256 of token, hex). */
   private async userKey(): Promise<string> {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(this.token));
-    const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(this.token));
+    const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
     return `${hash}:user`;
   }
 
@@ -106,9 +110,9 @@ const CLOCK_SKEW_SECONDS = 30;
 
 async function signAppJwt(appId: string, privateKeyPem: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  const key = await importPKCS8(privateKeyPem, "RS256");
+  const key = await importPKCS8(privateKeyPem, 'RS256');
   return new SignJWT({})
-    .setProtectedHeader({ alg: "RS256", typ: "JWT" })
+    .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
     .setIssuer(String(appId))
     .setIssuedAt(now - CLOCK_SKEW_SECONDS)
     .setExpirationTime(now + APP_JWT_TTL_SECONDS)

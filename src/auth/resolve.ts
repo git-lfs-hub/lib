@@ -1,8 +1,9 @@
-import type { Context } from "hono";
-import { GithubApi } from "../github";
-import type { KvStore } from "../cache";
-import { githubAccessToken } from "../github/accessToken";
-import { getSessionCookie, setSessionCookie, type SessionTokens } from "./session";
+import type { Context } from 'hono';
+
+import type { KvStore } from '../cache';
+import { GithubApi } from '../github';
+import { githubAccessToken } from '../github/accessToken';
+import { getSessionCookie, setSessionCookie, type SessionTokens } from './session';
 
 export async function resolveSession(
   c: Context,
@@ -16,7 +17,7 @@ export async function resolveSession(
 
   if (!username && cookie.refresh) {
     const data = await githubAccessToken({
-      grant_type: "refresh_token",
+      grant_type: 'refresh_token',
       client_id: opts.clientId,
       client_secret: opts.clientSecret,
       refresh_token: cookie.refresh,
