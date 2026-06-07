@@ -12,7 +12,7 @@ export type ObjectEvent = {
   repo: string;
   oid: string;
   size: number;
-  operation: "upload" | "verify" | "download";
+  operation: 'upload' | 'verify' | 'download';
 };
 
 /**
