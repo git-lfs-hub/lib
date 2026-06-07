@@ -1,8 +1,9 @@
-import { SignJWT, jwtVerify } from "jose";
-import { keyBytes } from "./_key";
-import { githubAccessToken } from "../github/accessToken";
-import { encryptSession, type SessionTokens } from "./session";
-import { urlWithParams } from "../utils";
+import { SignJWT, jwtVerify } from 'jose';
+
+import { githubAccessToken } from '../github/accessToken';
+import { urlWithParams } from '../utils';
+import { keyBytes } from './_key';
+import { encryptSession, type SessionTokens } from './session';
 
 const STATE_TTL = 600; // github oauth/authorize
 const EPHEMERAL_CODE_TTL = 300; // loopback OAuth code
@@ -25,7 +26,7 @@ export async function githubOAuthUrl(opts: {
   login?: string;
 }): Promise<string> {
   const signedState = await signState(opts.state, opts.secret);
-  return urlWithParams("https://github.com/login/oauth/authorize", {
+  return urlWithParams('https://github.com/login/oauth/authorize', {
     client_id: opts.clientId,
     redirect_uri: opts.callbackUrl,
     state: signedState,
@@ -34,9 +35,13 @@ export async function githubOAuthUrl(opts: {
   });
 }
 
-export async function signState(state: OAuthState, secret: string, ttl = STATE_TTL): Promise<string> {
+export async function signState(
+  state: OAuthState,
+  secret: string,
+  ttl = STATE_TTL,
+): Promise<string> {
   return new SignJWT({ ...state })
-    .setProtectedHeader({ alg: "HS256" })
+    .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime(Math.floor(Date.now() / 1000) + ttl)
     .sign(keyBytes(secret));
 }
@@ -71,11 +76,11 @@ export async function oauthCallback(opts: {
   callbackUrl: string;
 }): Promise<OAuthCallbackResult> {
   const state = opts.state ? await verifyState(opts.state, opts.secret) : null;
-  if (!state) return { ok: false, error: "invalid_state" };
+  if (!state) return { ok: false, error: 'invalid_state' };
 
   const fail = (error: string): OAuthCallbackResult => ({ ok: false, error, state });
 
-  if (!opts.code) return fail("missing_code");
+  if (!opts.code) return fail('missing_code');
 
   // Authorization-code grant: exchange the one-time `code` from GitHub's redirect
   // for the first access_token (and optional refresh_token). Used at login only.
@@ -86,7 +91,7 @@ export async function oauthCallback(opts: {
     redirect_uri: opts.callbackUrl,
   });
 
-  if (data.error || !data.access_token) return fail(data.error ?? "no_token");
+  if (data.error || !data.access_token) return fail(data.error ?? 'no_token');
 
   const tokens: SessionTokens = {
     access: data.access_token,
@@ -99,16 +104,13 @@ export async function oauthCallback(opts: {
 export async function oauthSuccessUrl(
   tokens: SessionTokens,
   state: OAuthState,
-  secret: string
+  secret: string,
 ): Promise<string> {
   const code = await encryptSession(tokens, secret, EPHEMERAL_CODE_TTL);
   return urlWithParams(state.redirect_uri, { code, state: state.client_state });
 }
 
 /** Loopback redirect after OAuth failure (`?error=…`). Caller must have a recovered state. */
-export function oauthErrorUrl(
-  state: OAuthState,
-  error: string
-): string {
+export function oauthErrorUrl(state: OAuthState, error: string): string {
   return urlWithParams(state.redirect_uri, { error, state: state.client_state });
 }

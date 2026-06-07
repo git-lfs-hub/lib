@@ -1,5 +1,5 @@
-import { GithubApi } from "./api";
-import { GithubError, isHttpError, mapHttpError } from "./errors";
+import { GithubApi } from './api';
+import { GithubError, isHttpError, mapHttpError } from './errors';
 
 export type RestRepo = {
   owner: { login: string };
@@ -29,16 +29,12 @@ export class GithubOrgApi extends GithubApi {
       installation_id = res.data.id;
     } catch (e) {
       if (isHttpError(e) && e.status === 404) {
-        throw new GithubError(
-          "no_installation",
-          `no installation for org: ${org}`,
-          404,
-        );
+        throw new GithubError('no_installation', `no installation for org: ${org}`, 404);
       }
       throw mapHttpError(e, `getOrgInstallation for ${org}`);
     }
     try {
-      const res = await app.octokit.rest.apps.createInstallationAccessToken({installation_id});
+      const res = await app.octokit.rest.apps.createInstallationAccessToken({ installation_id });
       const token = (res.data as { token: string }).token;
       return new GithubOrgApi(token, org);
     } catch (e) {
@@ -51,13 +47,14 @@ export class GithubOrgApi extends GithubApi {
    * Warns on low rate-limit remaining (< 100).
    */
   async *listRepos(): AsyncIterable<RestRepo[]> {
-    const iter = this.octokit.paginate.iterator(
-      this.octokit.rest.repos.listForOrg,
-      { org: this.org, per_page: 100, type: "all" },
-    );
+    const iter = this.octokit.paginate.iterator(this.octokit.rest.repos.listForOrg, {
+      org: this.org,
+      per_page: 100,
+      type: 'all',
+    });
     try {
       for await (const { data, headers } of iter) {
-        const remaining = Number(headers["x-ratelimit-remaining"] ?? "");
+        const remaining = Number(headers['x-ratelimit-remaining'] ?? '');
         if (remaining > 0 && remaining < 100) {
           console.warn(`[github] low rate limit remaining=${remaining}`);
         }

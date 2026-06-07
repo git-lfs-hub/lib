@@ -1,7 +1,18 @@
 {
   //"$schema": "./node_modules/oxfmt/configuration_schema.json",
-  //"printWidth": 100,
-  //"semi": true,
+  // "jsdoc": true,
+  // "jsdoc.lineWrappingStyle": "balance", // doesn't seem to work
+  "objectWrap": "preserve",
+  "printWidth": 100,
+  "semi": true,
   "singleQuote": true,
+  "sortImports": true,
   "sortPackageJson": false,
+  "ignorePatterns": ["*.template*"],
+  "overrides": [
+    {
+      "files": ["*.json", "*.jsonc", "*.json5"],
+      "options": { "trailingComma": "none" }
+    }
+  ]
 }

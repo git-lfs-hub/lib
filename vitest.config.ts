@@ -1,12 +1,12 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    environment: "node",
+    environment: 'node',
     coverage: {
-      provider: "istanbul",
-      include: ["src/**/*.ts"],
-      reporter: ["text", "text-summary", "json", "json-summary", "lcov"],
+      provider: 'istanbul',
+      include: ['src/**/*.ts'],
+      reporter: ['text', 'text-summary', 'json', 'json-summary', 'lcov'],
       thresholds: {
         statements: 80,
         branches: 80,
