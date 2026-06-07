@@ -6,7 +6,9 @@
   "printWidth": 100,
   "semi": true,
   "singleQuote": true,
-  "sortImports": true,
+  "sortImports": {
+    "internalPattern": ["~/", "@/", "#", "@git-lfs-hub/"]
+  },
   "sortPackageJson": false,
   "ignorePatterns": ["*.template*"],
   "overrides": [
