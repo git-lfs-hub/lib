@@ -148,61 +148,72 @@ describe('repoAccess', () => {
   });
 });
 
+describe('installedOrgs', () => {
+  function pageIterator(pages: Array<{ data: any[] }>) {
+    return async function* () {
+      for (const p of pages) yield p;
+    };
+  }
+
+  test('returns installed accounts (org and user), skips null accounts', async () => {
+    const pages = [
+      {
+        data: [
+          { id: 1, account: { login: 'Acme' } },
+          { id: 2, account: null },
+          { id: 3, account: { login: 'alice' } },
+        ],
+      },
+    ];
+    const a = api({
+      paginate: { iterator: () => pageIterator(pages)() },
+      rest: { apps: { listInstallations: vi.fn() } },
+    });
+    expect(await a.installedOrgs()).toEqual([
+      { login: 'Acme', id: 1 },
+      { login: 'alice', id: 3 },
+    ]);
+  });
+
+  test('throws GithubError on listing failure', async () => {
+    // eslint-disable-next-line require-yield -- async generator that only throws
+    const failingIter = async function* () {
+      throw Object.assign(new Error('403'), { status: 403 });
+    };
+    const a = api({
+      paginate: { iterator: () => failingIter() },
+      rest: { apps: { listInstallations: vi.fn() } },
+    });
+    await expect(a.installedOrgs()).rejects.toMatchObject({ code: 'forbidden', status: 403 });
+  });
+});
+
 describe('orgApi', () => {
-  test('returns GithubOrgApi when installation exists', async () => {
+  test('mints an installation token → GithubOrgApi bound to the account', async () => {
     const a = api({
       rest: {
         apps: {
-          getOrgInstallation: () => Promise.resolve({ data: { id: 42 } }),
           createInstallationAccessToken: () => Promise.resolve({ data: { token: 'ghs_abc' } }),
         },
       },
     });
-    const child = await a.orgApi('my-org');
+    const child = await a.orgApi({ login: 'my-org', id: 42 });
     expect(child).toBeInstanceOf(GithubOrgApi);
     expect(child.org).toBe('my-org');
-  });
-
-  test('throws no_installation when org has no installation', async () => {
-    const a = api({
-      rest: {
-        apps: {
-          getOrgInstallation: () =>
-            Promise.reject(Object.assign(new Error('404'), { status: 404 })),
-        },
-      },
-    });
-    await expect(a.orgApi('my-org')).rejects.toMatchObject({
-      name: 'GithubError',
-      code: 'no_installation',
-    });
   });
 
   test('throws unauthorized when App credentials rejected', async () => {
     const a = api({
       rest: {
         apps: {
-          getOrgInstallation: () =>
+          createInstallationAccessToken: () =>
             Promise.reject(Object.assign(new Error('401'), { status: 401 })),
         },
       },
     });
-    await expect(a.orgApi('my-org')).rejects.toMatchObject({
+    await expect(a.orgApi({ login: 'my-org', id: 42 })).rejects.toMatchObject({
       code: 'unauthorized',
       status: 401,
-    });
-  });
-
-  test('throws transient on unknown failure', async () => {
-    const a = api({
-      rest: {
-        apps: {
-          getOrgInstallation: () => Promise.reject(new Error('network down')),
-        },
-      },
-    });
-    await expect(a.orgApi('my-org')).rejects.toMatchObject({
-      code: 'transient',
     });
   });
 
@@ -210,13 +221,12 @@ describe('orgApi', () => {
     const a = api({
       rest: {
         apps: {
-          getOrgInstallation: () => Promise.resolve({ data: { id: 42 } }),
           createInstallationAccessToken: () =>
             Promise.reject(Object.assign(new Error('500'), { status: 500 })),
         },
       },
     });
-    await expect(a.orgApi('my-org')).rejects.toMatchObject({
+    await expect(a.orgApi({ login: 'my-org', id: 42 })).rejects.toMatchObject({
       code: 'transient',
       status: 500,
     });
@@ -237,7 +247,7 @@ describe('listRepos', () => {
     ];
     const o = orgApi({
       paginate: { iterator: () => pageIterator(pages)() },
-      rest: { repos: { listForOrg: vi.fn() } },
+      rest: { apps: { listReposAccessibleToInstallation: vi.fn() } },
     });
     const collected: string[] = [];
     for await (const page of o.listRepos()) {
@@ -253,7 +263,7 @@ describe('listRepos', () => {
     ];
     const o = orgApi({
       paginate: { iterator: () => pageIterator(pages)() },
-      rest: { repos: { listForOrg: vi.fn() } },
+      rest: { apps: { listReposAccessibleToInstallation: vi.fn() } },
     });
     for await (const _ of o.listRepos()) {
       /* drain */
@@ -269,7 +279,7 @@ describe('listRepos', () => {
     };
     const o = orgApi({
       paginate: { iterator: () => failingIter() },
-      rest: { repos: { listForOrg: vi.fn() } },
+      rest: { apps: { listReposAccessibleToInstallation: vi.fn() } },
     });
     await expect(async () => {
       for await (const _ of o.listRepos()) {
@@ -285,7 +295,7 @@ describe('listRepos', () => {
     };
     const o = orgApi({
       paginate: { iterator: () => failingIter() },
-      rest: { repos: { listForOrg: vi.fn() } },
+      rest: { apps: { listReposAccessibleToInstallation: vi.fn() } },
     });
     await expect(async () => {
       for await (const _ of o.listRepos()) {

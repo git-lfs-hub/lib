@@ -1,12 +1,12 @@
 import { GithubApi } from './api';
-import { GithubError, isHttpError, mapHttpError } from './errors';
+import { mapHttpError } from './errors';
 
 export type RestRepo = {
   owner: { login: string };
   name: string;
 };
 
-/** GithubApi bound to a single org via an installation token. */
+/** GithubApi bound to a single installation (org or user account) via an installation token. */
 export class GithubOrgApi extends GithubApi {
   readonly org: string;
 
@@ -16,42 +16,37 @@ export class GithubOrgApi extends GithubApi {
   }
 
   /**
-   * Build an installation-authenticated client for `org` from an App-JWT
-   * `app`. Throws GithubError:
-   *   - code: "no_installation" — no installation for org
+   * Build an installation-authenticated client from an App-JWT `app` and a known
+   * installation id (from `listInstallations`). Throws GithubError:
    *   - code: "unauthorized" | "forbidden" — App credentials rejected
    *   - code: "transient" — other failure
    */
-  static async forAppOrg(app: GithubApi, org: string): Promise<GithubOrgApi> {
-    let installation_id: number;
+  static async forInstallation(
+    app: GithubApi,
+    installationId: number,
+    account: string,
+  ): Promise<GithubOrgApi> {
     try {
-      const res = await app.octokit.rest.apps.getOrgInstallation({ org });
-      installation_id = res.data.id;
-    } catch (e) {
-      if (isHttpError(e) && e.status === 404) {
-        throw new GithubError('no_installation', `no installation for org: ${org}`, 404);
-      }
-      throw mapHttpError(e, `getOrgInstallation for ${org}`);
-    }
-    try {
-      const res = await app.octokit.rest.apps.createInstallationAccessToken({ installation_id });
+      const res = await app.octokit.rest.apps.createInstallationAccessToken({
+        installation_id: installationId,
+      });
       const token = (res.data as { token: string }).token;
-      return new GithubOrgApi(token, org);
+      return new GithubOrgApi(token, account);
     } catch (e) {
-      throw mapHttpError(e, `createInstallationAccessToken for ${org}`);
+      throw mapHttpError(e, `createInstallationAccessToken for ${account}`);
     }
   }
 
   /**
-   * Paginate `GET /orgs/{org}/repos`. Throws GithubError on failure.
-   * Warns on low rate-limit remaining (< 100).
+   * Paginate `GET /installation/repositories` — every repo the installation can
+   * reach (org or user account). Throws GithubError on failure. Warns on low
+   * rate-limit remaining (< 100).
    */
   async *listRepos(): AsyncIterable<RestRepo[]> {
-    const iter = this.octokit.paginate.iterator(this.octokit.rest.repos.listForOrg, {
-      org: this.org,
-      per_page: 100,
-      type: 'all',
-    });
+    const iter = this.octokit.paginate.iterator(
+      this.octokit.rest.apps.listReposAccessibleToInstallation,
+      { per_page: 100 },
+    );
     try {
       for await (const { data, headers } of iter) {
         const remaining = Number(headers['x-ratelimit-remaining'] ?? '');
@@ -61,7 +56,7 @@ export class GithubOrgApi extends GithubApi {
         yield data as RestRepo[];
       }
     } catch (e) {
-      throw mapHttpError(e, `GET /orgs/${this.org}/repos`);
+      throw mapHttpError(e, `GET /installation/repositories`);
     }
   }
 }

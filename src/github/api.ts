@@ -9,6 +9,9 @@ export const USER_AGENT = 'git-lfs-hub';
 
 export type RepoAccess = 'read' | 'write';
 
+/** An account (org or user) the App is installed on. The installation id stays internal. */
+type InstalledOrg = { login: string; id: number };
+
 const CACHE_TTL = {
   ':user': 86400, // token -> user 1 day
   ':access': 300, // user -> access 5 min
@@ -30,10 +33,33 @@ export class GithubApi {
     return new GithubApi(await signAppJwt(appId, appPrivateKey));
   }
 
-  async orgApi(org: string): Promise<GithubOrgApi> {
+  /**
+   * Every account the App is installed on — the authoritative set of owners to
+   * reconcile. Paginate `GET /app/installations` (App-JWT). User and org installs
+   * alike; the caller treats each `login` as an owner.
+   */
+  async installedOrgs(): Promise<InstalledOrg[]> {
+    const out: InstalledOrg[] = [];
+    const iter = this.octokit.paginate.iterator(this.octokit.rest.apps.listInstallations, {
+      per_page: 100,
+    });
+    try {
+      for await (const { data } of iter) {
+        for (const i of data as { id: number; account: { login: string } | null }[]) {
+          if (i.account) out.push({ login: i.account.login, id: i.id });
+        }
+      }
+    } catch (e) {
+      throw mapHttpError(e, 'GET /app/installations');
+    }
+    return out;
+  }
+
+  /** Installation-authenticated client for an installed account (from `installedOrgs`). */
+  async orgApi(org: InstalledOrg): Promise<GithubOrgApi> {
     // Dynamic import breaks the api ↔ api-org cycle.
     const { GithubOrgApi } = await import('./api-org');
-    return GithubOrgApi.forAppOrg(this, org);
+    return GithubOrgApi.forInstallation(this, org.id, org.login);
   }
 
   async authenticatedUsername(): Promise<string | null> {
