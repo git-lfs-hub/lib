@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'vitest';
 
-import { keyBytes, hexToBytes } from './_key';
+import { keyBytes, hexToBytes, sha256hex } from './index';
 
 describe('keyBytes', () => {
   test('decodes a hex secret to bytes', () => {
@@ -10,6 +10,25 @@ describe('keyBytes', () => {
   test('throws when the secret is absent', () => {
     expect(() => keyBytes()).toThrow('session secret is not set');
     expect(() => keyBytes('')).toThrow('session secret is not set');
+  });
+
+  test('throws when the secret is not valid hex', () => {
+    expect(() => keyBytes('0g')).toThrow('session secret is not valid hex');
+    expect(() => keyBytes('abc')).toThrow('session secret is not valid hex');
+  });
+});
+
+describe('sha256hex', () => {
+  test('lowercase hex digest of a UTF-8 string', async () => {
+    expect(await sha256hex('abc')).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    );
+  });
+
+  test('empty string', async () => {
+    expect(await sha256hex('')).toBe(
+      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    );
   });
 });
 

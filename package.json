@@ -5,6 +5,7 @@
   "exports": {
     "./auth": "./src/auth/index.ts",
     "./auth/session": "./src/auth/session.ts",
+    "./crypto": "./src/crypto/index.ts",
     "./github": "./src/github/index.ts",
     "./contracts": "./src/contracts/index.ts"
   },

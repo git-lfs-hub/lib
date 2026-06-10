@@ -2,6 +2,7 @@ import { Octokit } from '@octokit/rest';
 import { SignJWT, importPKCS8 } from 'jose';
 
 import { Cache, type KvStore } from '../cache';
+import { sha256hex } from '../crypto';
 import type { GithubOrgApi } from './api-org';
 import { isHttpError, mapHttpError } from './errors';
 
@@ -127,9 +128,7 @@ export class GithubApi {
 
   /** `{hash}:user` key (SHA-256 of token, hex). */
   private async userKey(): Promise<string> {
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(this.token));
-    const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-    return `${hash}:user`;
+    return `${await sha256hex(this.token)}:user`;
   }
 
   /** `{user}:{scope}:access` key, or `null` when the user is unknown. */

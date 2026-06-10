@@ -1,4 +1,4 @@
-import { hexToBytes } from './_key';
+import { hexToBytes } from '../crypto';
 
 // Verify a GitHub-style `sha256=<hex>` HMAC-SHA256 signature over a raw request body.
 // `crypto.subtle.verify` is constant-time, so decode the supplied hex and let it compare.
