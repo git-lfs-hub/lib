@@ -13,7 +13,7 @@
 Order code in reading order of the main flow — not the order the compiler needs definitions.
 
 - **Top-down: callers before callees.** Entry point / public export at the top; each
-  helper appears *below* its first caller. Reading top-to-bottom, you meet each name in
+  helper appears _below_ its first caller. Reading top-to-bottom, you meet each name in
   use before its definition.
   - Exception: "main" script entry point functions at the bottom
 - **Main flow first; edge cases, helpers, and error handling last.** Happy path reads as
