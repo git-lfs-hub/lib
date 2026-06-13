@@ -22,7 +22,8 @@ Order code in reading order of the main flow — not the order the compiler need
   them. Do NOT reorder to "definition before use": a `const fn = () => …` parked above its
   only caller is the wrong shape — make it a `function` and move it down.
 - Group by use case. Tests mirror the main file's order.
-- Keep comments brief. Focus on the "why" and the non-obvious.
+- Keep comments brief, regardless how chatty existing comments are.
+  Focus on the "why" and the non-obvious.
 
 ## Testing
 
