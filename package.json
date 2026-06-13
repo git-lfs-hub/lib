@@ -5,7 +5,9 @@
   "exports": {
     "./auth": "./src/auth/index.ts",
     "./auth/session": "./src/auth/session.ts",
-    "./github": "./src/github/index.ts"
+    "./crypto": "./src/crypto/index.ts",
+    "./github": "./src/github/index.ts",
+    "./contracts": "./src/contracts/index.ts"
   },
   "scripts": {
     "compile": "tsgo --noEmit",
@@ -20,7 +22,7 @@
   },
   "packageManager": "bun@1.3.14",
   "engines": {
-    "node": "^26.1.0"
+    "node": "^26.3.0"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",

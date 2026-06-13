@@ -23,6 +23,7 @@ bun install
 ## API
 
 Import from `@git-lfs-hub/lib/auth` (see `src/auth/index.ts`). Other entry points: `@git-lfs-hub/lib/github`.
+Import from `@git-lfs-hub/lib/auth` (see `src/auth/index.ts`). Other entry points: `@git-lfs-hub/lib/github`, `@git-lfs-hub/lib/contracts`.
 
 ### OAuth
 
@@ -41,6 +42,10 @@ Tokens live in two independent cookies; `gh_session_v2` is read-only legacy, mig
 - **`encryptSession(tokens, secret, ttl?)`** → JWE (AES-256-GCM) / **`decryptSession(token, secret)`** → `SessionTokens | null` — monolithic encode/decode for ephemeral OAuth codes and legacy cookies.
 
 `SessionTokens` is `{ access: string; refresh?: string }` (the GitHub wire `access_token`/`refresh_token` names are kept only at the GitHub and CLI boundaries).
+
+### Guards
+
+- **`requireOrgRole(api, org, role)`** → `Response | null` — 403 when the user lacks the required org role; pass a `GithubApi` (or compatible `orgRole`).
 
 ## Key format
 
