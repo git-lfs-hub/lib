@@ -2,8 +2,8 @@ import type { Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { EncryptJWT, jwtDecrypt } from 'jose';
 
+import { keyBytes } from '../crypto';
 import { ifString } from '../utils';
-import { keyBytes } from './_key';
 
 export const ACCESS_COOKIE = 'gh_access'; // access only
 export const REFRESH_COOKIE = 'gh_refresh'; // refresh only

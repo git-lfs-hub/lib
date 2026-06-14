@@ -1,8 +1,8 @@
 import { SignJWT, jwtVerify } from 'jose';
 
+import { keyBytes } from '../crypto';
 import { githubAccessToken } from '../github/accessToken';
 import { urlWithParams } from '../utils';
-import { keyBytes } from './_key';
 import { encryptSession, type SessionTokens } from './session';
 
 const STATE_TTL = 600; // github oauth/authorize

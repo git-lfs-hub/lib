@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { EncryptJWT } from 'jose';
 import { describe, test, expect } from 'vitest';
 
-import { keyBytes } from './_key';
+import { keyBytes } from '../crypto';
 import {
   encryptSession,
   decryptSession,

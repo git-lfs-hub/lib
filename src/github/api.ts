@@ -2,11 +2,16 @@ import { Octokit } from '@octokit/rest';
 import { SignJWT, importPKCS8 } from 'jose';
 
 import { Cache, type KvStore } from '../cache';
+import { sha256hex } from '../crypto';
 import type { GithubOrgApi } from './api-org';
+import { isHttpError, mapHttpError } from './errors';
 
 export const USER_AGENT = 'git-lfs-hub';
 
 export type RepoAccess = 'read' | 'write';
+
+/** An account (org or user) the App is installed on. The installation id stays internal. */
+type InstalledOrg = { login: string; id: number };
 
 const CACHE_TTL = {
   ':user': 86400, // token -> user 1 day
@@ -29,10 +34,33 @@ export class GithubApi {
     return new GithubApi(await signAppJwt(appId, appPrivateKey));
   }
 
-  async orgApi(org: string): Promise<GithubOrgApi> {
+  /**
+   * Every account the App is installed on — the authoritative set of owners to
+   * reconcile. Paginate `GET /app/installations` (App-JWT). User and org installs
+   * alike; the caller treats each `login` as an owner.
+   */
+  async installedOrgs(): Promise<InstalledOrg[]> {
+    const out: InstalledOrg[] = [];
+    const iter = this.octokit.paginate.iterator(this.octokit.rest.apps.listInstallations, {
+      per_page: 100,
+    });
+    try {
+      for await (const { data } of iter) {
+        for (const i of data as { id: number; account: { login: string } | null }[]) {
+          if (i.account) out.push({ login: i.account.login, id: i.id });
+        }
+      }
+    } catch (e) {
+      throw mapHttpError(e, 'GET /app/installations');
+    }
+    return out;
+  }
+
+  /** Installation-authenticated client for an installed account (from `installedOrgs`). */
+  async orgApi(org: InstalledOrg): Promise<GithubOrgApi> {
     // Dynamic import breaks the api ↔ api-org cycle.
     const { GithubOrgApi } = await import('./api-org');
-    return GithubOrgApi.forAppOrg(this, org);
+    return GithubOrgApi.forInstallation(this, org.id, org.login);
   }
 
   async authenticatedUsername(): Promise<string | null> {
@@ -49,17 +77,24 @@ export class GithubApi {
     return login;
   }
 
+  /**
+   * Active org membership role for the authenticated user, or `null` when the
+   * user is not an active member. Throws GithubError on API failure (e.g.
+   * `forbidden` when the token cannot read org membership).
+   */
   async orgRole(org: string): Promise<'admin' | 'member' | null> {
     return this.withCache(
       () => this.accessKey(org),
-      () =>
-        this.octokit.rest.orgs
-          .getMembershipForAuthenticatedUser({ org })
-          .then(({ data }) => {
-            if (data.state !== 'active') return null;
-            return data.role === 'admin' ? 'admin' : 'member';
-          })
-          .catch(() => null),
+      async () => {
+        try {
+          const { data } = await this.octokit.rest.orgs.getMembershipForAuthenticatedUser({ org });
+          if (data.state !== 'active') return null;
+          return data.role === 'admin' ? 'admin' : 'member';
+        } catch (e) {
+          if (isHttpError(e) && e.status === 404) return null;
+          throw mapHttpError(e, `getMembershipForAuthenticatedUser for ${org}`);
+        }
+      },
     );
   }
 
@@ -93,9 +128,7 @@ export class GithubApi {
 
   /** `{hash}:user` key (SHA-256 of token, hex). */
   private async userKey(): Promise<string> {
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(this.token));
-    const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-    return `${hash}:user`;
+    return `${await sha256hex(this.token)}:user`;
   }
 
   /** `{user}:{scope}:access` key, or `null` when the user is unknown. */
