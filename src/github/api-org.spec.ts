@@ -104,6 +104,53 @@ describe('scanRepos', () => {
   });
 });
 
+describe('getFile', () => {
+  function fileApi(getContent: any) {
+    return orgApi({ rest: { repos: { getContent } } });
+  }
+
+  test('decodes a base64 file blob → sha + text', async () => {
+    const o = fileApi(
+      vi.fn().mockResolvedValue({
+        data: { type: 'file', sha: 'b1', content: btoa('[lfs]\n'), encoding: 'base64' },
+      }),
+    );
+    expect(await o.getFile('repo', '.lfsconfig', 'c1')).toEqual({ sha: 'b1', text: '[lfs]\n' });
+  });
+
+  test('passes raw (non-base64) content through', async () => {
+    const o = fileApi(
+      vi.fn().mockResolvedValue({
+        data: { type: 'file', sha: 'b1', content: 'plain', encoding: 'none' },
+      }),
+    );
+    expect(await o.getFile('repo', '.lfsconfig', 'c1')).toEqual({ sha: 'b1', text: 'plain' });
+  });
+
+  test('404 → null', async () => {
+    const o = fileApi(vi.fn().mockRejectedValue(Object.assign(new Error('404'), { status: 404 })));
+    expect(await o.getFile('repo', '.lfsconfig', 'c1')).toBeNull();
+  });
+
+  test('a directory (array payload) → null', async () => {
+    const o = fileApi(vi.fn().mockResolvedValue({ data: [{ type: 'file', name: 'a' }] }));
+    expect(await o.getFile('repo', 'dir', 'c1')).toBeNull();
+  });
+
+  test('a non-file entry (submodule/symlink) → null', async () => {
+    const o = fileApi(vi.fn().mockResolvedValue({ data: { type: 'submodule', sha: 'b1' } }));
+    expect(await o.getFile('repo', '.gitmodules', 'c1')).toBeNull();
+  });
+
+  test('other errors → GithubError', async () => {
+    const o = fileApi(vi.fn().mockRejectedValue(Object.assign(new Error('500'), { status: 500 })));
+    await expect(o.getFile('repo', '.lfsconfig', 'c1')).rejects.toMatchObject({
+      code: 'transient',
+      status: 500,
+    });
+  });
+});
+
 async function collect<T>(it: AsyncIterable<T>): Promise<T[]> {
   const out: T[] = [];
   for await (const x of it) out.push(x);

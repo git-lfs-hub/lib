@@ -1,5 +1,5 @@
 import { GithubApi } from './api';
-import { mapHttpError } from './errors';
+import { isHttpError, mapHttpError } from './errors';
 
 /** One repo from a `scanRepos` sweep. `lfsconfig` null = file absent; `{ text: null }` = present
  *  but unreadable (binary/truncated, a parse fallback). `branch`/`headSha` null = empty repo. */
@@ -68,6 +68,34 @@ export class GithubOrgApi extends GithubApi {
       throw mapHttpError(e, `GraphQL repositories for ${this.org}`);
     }
   }
+
+  /**
+   * Fetch one file's blob — sha + decoded UTF-8 bytes — at a ref via the Contents API (one request
+   * returns both). Null when the path is absent (404) or isn't a regular file; throws GithubError
+   * on any other failure.
+   */
+  async getFile(
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<{ sha: string; text: string } | null> {
+    let data;
+    try {
+      ({ data } = await this.octokit.rest.repos.getContent({ owner: this.org, repo, path, ref }));
+    } catch (e) {
+      if (isHttpError(e) && e.status === 404) return null;
+      throw mapHttpError(e, `GET ${this.org}/${repo}/${path}`);
+    }
+    if (Array.isArray(data) || data.type !== 'file') return null;
+    const text = data.encoding === 'base64' ? decodeBase64Utf8(data.content) : data.content;
+    return { sha: data.sha, text };
+  }
+}
+
+/** Decode the Contents API's base64 blob (newline-wrapped) into UTF-8 text. */
+function decodeBase64Utf8(content: string): string {
+  const bytes = Uint8Array.from(atob(content.replace(/\s/g, '')), (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 type RepoNode = {
