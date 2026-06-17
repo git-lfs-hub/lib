@@ -45,7 +45,9 @@ describe('gitConfigFirstValue', () => {
   });
 
   test('skips an `[lfs "sub"]` subsection, reads the plain [lfs]', () => {
-    expect(url('[lfs "x"]\n\turl = https://other\n[lfs]\n\turl = https://h/p\n')).toBe('https://h/p');
+    expect(url('[lfs "x"]\n\turl = https://other\n[lfs]\n\turl = https://h/p\n')).toBe(
+      'https://h/p',
+    );
   });
 
   test('returns the first matching value', () => {

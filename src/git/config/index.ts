@@ -26,7 +26,8 @@ function stripComment(line: string): string {
   let inQuote = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
-    if (c === '\\') i++; // escaped char can't open/close a quote or start a comment
+    if (c === '\\')
+      i++; // escaped char can't open/close a quote or start a comment
     else if (c === '"') inQuote = !inQuote;
     else if (!inQuote && (c === '#' || c === ';')) return line.slice(0, i);
   }
