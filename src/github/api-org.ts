@@ -1,9 +1,14 @@
 import { GithubApi } from './api';
-import { mapHttpError } from './errors';
+import { isHttpError, mapHttpError } from './errors';
 
-export type RestRepo = {
-  owner: { login: string };
+/** One repo from a `scanRepos` sweep. `lfsconfig` null = file absent; `{ text: null }` = present
+ *  but unreadable (binary/truncated, a parse fallback). `branch`/`headSha` null = empty repo. */
+export type RepoScan = {
+  owner: string;
   name: string;
+  branch: string | null;
+  headSha: string | null;
+  lfsconfig: { oid: string; text: string | null } | null;
 };
 
 /** GithubApi bound to a single installation (org or user account) via an installation token. */
@@ -38,25 +43,106 @@ export class GithubOrgApi extends GithubApi {
   }
 
   /**
-   * Paginate `GET /installation/repositories` — every repo the installation can
-   * reach (org or user account). Throws GithubError on failure. Warns on low
-   * rate-limit remaining (< 100).
+   * One GraphQL query per ~100 repos → presence + default-branch head + `.lfsconfig` inline, so a
+   * full sweep is ~N/100 requests with no per-repo fetch. The installation token scopes the
+   * listing to accessible repos. Throws GithubError on failure.
    */
-  async *listRepos(): AsyncIterable<RestRepo[]> {
-    const iter = this.octokit.paginate.iterator(
-      this.octokit.rest.apps.listReposAccessibleToInstallation,
-      { per_page: 100 },
-    );
+  async *scanRepos(): AsyncIterable<RepoScan[]> {
+    let cursor: string | null = null;
     try {
-      for await (const { data, headers } of iter) {
-        const remaining = Number(headers['x-ratelimit-remaining'] ?? '');
-        if (remaining > 0 && remaining < 100) {
+      do {
+        const res: RepoScanQuery = await this.octokit.graphql(REPO_SCAN_QUERY, {
+          login: this.org,
+          cursor,
+        });
+        const remaining = res.rateLimit?.remaining;
+        if (typeof remaining === 'number' && remaining < 500) {
           console.warn(`[github] low rate limit remaining=${remaining}`);
         }
-        yield data as RestRepo[];
-      }
+        const conn = res.repositoryOwner?.repositories;
+        if (!conn) return; // owner gone / not visible to this token
+        yield conn.nodes.map(toRepoScan);
+        cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+      } while (cursor);
     } catch (e) {
-      throw mapHttpError(e, `GET /installation/repositories`);
+      throw mapHttpError(e, `GraphQL repositories for ${this.org}`);
     }
   }
+
+  /**
+   * Fetch one file's blob — sha + decoded UTF-8 bytes — at a ref via the Contents API (one request
+   * returns both). Null when the path is absent (404) or isn't a regular file; throws GithubError
+   * on any other failure.
+   */
+  async getFile(
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<{ sha: string; text: string } | null> {
+    let data;
+    try {
+      ({ data } = await this.octokit.rest.repos.getContent({ owner: this.org, repo, path, ref }));
+    } catch (e) {
+      if (isHttpError(e) && e.status === 404) return null;
+      throw mapHttpError(e, `GET ${this.org}/${repo}/${path}`);
+    }
+    if (Array.isArray(data) || data.type !== 'file') return null;
+    const text = data.encoding === 'base64' ? decodeBase64Utf8(data.content) : data.content;
+    return { sha: data.sha, text };
+  }
 }
+
+/** Decode the Contents API's base64 blob (newline-wrapped) into UTF-8 text. */
+function decodeBase64Utf8(content: string): string {
+  const bytes = Uint8Array.from(atob(content.replace(/\s/g, '')), (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+type RepoNode = {
+  name: string;
+  owner: { login: string };
+  defaultBranchRef: { name: string; target: { oid: string } | null } | null;
+  object: { oid: string; text: string | null; isTruncated: boolean } | null;
+};
+
+type RepoScanQuery = {
+  rateLimit: { remaining: number } | null;
+  repositoryOwner: {
+    repositories: {
+      pageInfo: { endCursor: string | null; hasNextPage: boolean };
+      nodes: RepoNode[];
+    };
+  } | null;
+};
+
+function toRepoScan(n: RepoNode): RepoScan {
+  const blob = n.object
+    ? { oid: n.object.oid, text: n.object.isTruncated ? null : n.object.text }
+    : null;
+  return {
+    owner: n.owner.login,
+    name: n.name,
+    branch: n.defaultBranchRef?.name ?? null,
+    headSha: n.defaultBranchRef?.target?.oid ?? null,
+    lfsconfig: blob,
+  };
+}
+
+const REPO_SCAN_QUERY = `
+  query ($login: String!, $cursor: String) {
+    rateLimit { remaining }
+    repositoryOwner(login: $login) {
+      repositories(first: 100, after: $cursor) {
+        pageInfo { endCursor hasNextPage }
+        nodes {
+          name
+          owner { login }
+          defaultBranchRef { name target { oid } }
+          object(expression: "HEAD:.lfsconfig") {
+            ... on Blob { oid text isTruncated }
+          }
+        }
+      }
+    }
+  }
+`;

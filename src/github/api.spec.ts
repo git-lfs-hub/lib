@@ -31,12 +31,6 @@ function cachedApi(octokit: any, kv: KvStore): GithubApi {
   return a;
 }
 
-function orgApi(octokit: any, org = 'my-org'): GithubOrgApi {
-  const o = new GithubOrgApi('t', org);
-  (o as { octokit: unknown }).octokit = octokit;
-  return o;
-}
-
 describe('authenticatedUsername', () => {
   test('returns login when authenticated', async () => {
     const a = api({
@@ -230,78 +224,6 @@ describe('orgApi', () => {
       code: 'transient',
       status: 500,
     });
-  });
-});
-
-describe('listRepos', () => {
-  function pageIterator(pages: Array<{ data: any[]; headers: Record<string, string> }>) {
-    return async function* () {
-      for (const p of pages) yield p;
-    };
-  }
-
-  test('yields pages of repos', async () => {
-    const pages = [
-      { data: [{ owner: { login: 'Acme' }, name: 'alpha' }], headers: {} },
-      { data: [{ owner: { login: 'Acme' }, name: 'beta' }], headers: {} },
-    ];
-    const o = orgApi({
-      paginate: { iterator: () => pageIterator(pages)() },
-      rest: { apps: { listReposAccessibleToInstallation: vi.fn() } },
-    });
-    const collected: string[] = [];
-    for await (const page of o.listRepos()) {
-      for (const r of page) collected.push(r.name);
-    }
-    expect(collected).toEqual(['alpha', 'beta']);
-  });
-
-  test('warns on low rate-limit remaining', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const pages = [
-      { data: [{ owner: { login: 'x' }, name: 'r' }], headers: { 'x-ratelimit-remaining': '50' } },
-    ];
-    const o = orgApi({
-      paginate: { iterator: () => pageIterator(pages)() },
-      rest: { apps: { listReposAccessibleToInstallation: vi.fn() } },
-    });
-    for await (const _ of o.listRepos()) {
-      /* drain */
-    }
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining('low rate limit'));
-    spy.mockRestore();
-  });
-
-  test('throws GithubError forbidden on 403', async () => {
-    // eslint-disable-next-line require-yield -- async generator that only throws
-    const failingIter = async function* () {
-      throw Object.assign(new Error('403'), { status: 403 });
-    };
-    const o = orgApi({
-      paginate: { iterator: () => failingIter() },
-      rest: { apps: { listReposAccessibleToInstallation: vi.fn() } },
-    });
-    await expect(async () => {
-      for await (const _ of o.listRepos()) {
-        /* drain */
-      }
-    }).rejects.toMatchObject({ code: 'forbidden', status: 403 });
-  });
-
-  test('throws GithubError missing on 404', async () => {
-    // eslint-disable-next-line require-yield -- async generator that only throws
-    const failingIter = async function* () {
-      throw Object.assign(new Error('404'), { status: 404 });
-    };
-    const o = orgApi({
-      paginate: { iterator: () => failingIter() },
-      rest: { apps: { listReposAccessibleToInstallation: vi.fn() } },
-    });
-    await expect(async () => {
-      for await (const _ of o.listRepos()) {
-        /* drain */
-      }
-    }).rejects.toMatchObject({ code: 'missing', status: 404 });
   });
 });
 
