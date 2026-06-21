@@ -27,4 +27,13 @@ export interface LfsServer {
   unblockRepo(owner: string, repo: string): Promise<void>;
   /** Post-R2-purge cleanup: wipe Locks + mark the registry row purged. Idempotent. */
   purgeRepo(owner: string, repo: string): Promise<void>;
+
+  // Per-object soft-delete. lfs-server resolves (owner, repo) to the canonical
+  // storage prefix itself — same as blockRepo — so callers can't spoof the prefix.
+  /** Block the given OIDs for the repo (batch/verify → 404). Idempotent. */
+  blockObjects(owner: string, repo: string, oids: string[]): Promise<void>;
+  /** Undelete: unblock the given OIDs. Idempotent. */
+  unblockObjects(owner: string, repo: string, oids: string[]): Promise<void>;
+  /** Post-R2-purge cleanup: drop blocklist rows for the purged OIDs. Idempotent. */
+  purgeObjects(owner: string, repo: string, oids: string[]): Promise<void>;
 }
