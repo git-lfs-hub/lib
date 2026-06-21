@@ -151,6 +151,190 @@ describe('getFile', () => {
   });
 });
 
+describe('listBranches', () => {
+  function refPage(nodes: unknown[], hasNextPage = false, endCursor: string | null = null) {
+    return {
+      rateLimit: { remaining: 4999, resetAt: '2026-01-01T00:00:00Z' },
+      repository: { refs: { pageInfo: { endCursor, hasNextPage }, nodes } },
+    };
+  }
+  const ref = (name: string, oid: string | null, tree: string | null) => ({
+    name,
+    target: oid ? { oid, tree: tree ? { oid: tree } : null } : null,
+  });
+
+  test('pages refs, returns head + tree sha, last rateLimit', async () => {
+    const graphql = vi
+      .fn()
+      .mockResolvedValueOnce(refPage([ref('main', 'h1', 't1')], true, 'c1'))
+      .mockResolvedValueOnce(refPage([ref('dev', 'h2', 't2')]));
+    const o = orgApi({ graphql });
+    const res = await o.listBranches('repo');
+    expect(graphql.mock.calls[1][1]).toEqual({ owner: 'my-org', repo: 'repo', cursor: 'c1' });
+    expect(res.branches).toEqual([
+      { branch: 'main', headSha: 'h1', treeSha: 't1' },
+      { branch: 'dev', headSha: 'h2', treeSha: 't2' },
+    ]);
+    expect(res.rateLimit).toEqual({ remaining: 4999, resetAt: '2026-01-01T00:00:00Z' });
+  });
+
+  test('skips a tag/lightweight ref with no commit tree', async () => {
+    const o = orgApi({ graphql: vi.fn().mockResolvedValue(refPage([ref('weird', 'h1', null)])) });
+    expect((await o.listBranches('repo')).branches).toEqual([]);
+  });
+
+  test('empty/absent repo → no branches', async () => {
+    const o = orgApi({ graphql: vi.fn().mockResolvedValue({ rateLimit: null, repository: null }) });
+    expect((await o.listBranches('repo')).branches).toEqual([]);
+  });
+
+  test('maps a 403 to forbidden', async () => {
+    const o = orgApi({
+      graphql: vi.fn().mockRejectedValue(Object.assign(new Error('403'), { status: 403 })),
+    });
+    await expect(o.listBranches('repo')).rejects.toMatchObject({ code: 'forbidden' });
+  });
+});
+
+describe('getTree', () => {
+  function treeApi(getTree: any) {
+    return orgApi({ rest: { git: { getTree } } });
+  }
+
+  test('maps blob/tree/commit entries, surfaces truncation', async () => {
+    const o = treeApi(
+      vi.fn().mockResolvedValue({
+        data: {
+          truncated: true,
+          tree: [
+            { path: 'a.bin', type: 'blob', sha: 'b1' },
+            { path: 'sub', type: 'tree', sha: 't1' },
+            { path: 'mod', type: 'commit', sha: 'c1' },
+            { path: 'bad', type: 'blob' },
+          ],
+        },
+      }),
+    );
+    expect(await o.getTree('repo', 'root')).toEqual({
+      truncated: true,
+      entries: [
+        { path: 'a.bin', type: 'blob', sha: 'b1' },
+        { path: 'sub', type: 'tree', sha: 't1' },
+        { path: 'mod', type: 'commit', sha: 'c1' },
+      ],
+    });
+  });
+
+  test('recursive flag set on the request', async () => {
+    const getTree = vi.fn().mockResolvedValue({ data: { truncated: false, tree: [] } });
+    await treeApi(getTree).getTree('repo', 'root');
+    expect(getTree.mock.calls[0][0]).toMatchObject({ tree_sha: 'root', recursive: '1' });
+  });
+
+  test('getSubtree omits the recursive flag', async () => {
+    const getTree = vi.fn().mockResolvedValue({ data: { tree: [] } });
+    await treeApi(getTree).getSubtree('repo', 'root');
+    expect(getTree.mock.calls[0][0].recursive).toBeUndefined();
+  });
+});
+
+describe('listBlobs', () => {
+  test('untruncated tree → blob entries only, one call', async () => {
+    const getTree = vi.fn().mockResolvedValue({
+      data: {
+        truncated: false,
+        tree: [
+          { path: 'a.bin', type: 'blob', sha: 'b1' },
+          { path: 'sub', type: 'tree', sha: 't1' },
+        ],
+      },
+    });
+    const o = orgApi({ rest: { git: { getTree } } });
+    expect(await o.listBlobs('repo', 'root')).toEqual([{ path: 'a.bin', type: 'blob', sha: 'b1' }]);
+    expect(getTree).toHaveBeenCalledTimes(1);
+  });
+
+  test('truncated tree → per-subtree descent with joined paths', async () => {
+    const getTree = vi.fn(async (args: any) => {
+      if (args.recursive) return { data: { truncated: true, tree: [] } };
+      if (args.tree_sha === 'root')
+        return {
+          data: {
+            tree: [
+              { path: '.gitattributes', type: 'blob', sha: 'ga' },
+              { path: 'sub', type: 'tree', sha: 'tsub' },
+            ],
+          },
+        };
+      if (args.tree_sha === 'tsub')
+        return { data: { tree: [{ path: 'a.bin', type: 'blob', sha: 'b1' }] } };
+      return { data: { tree: [] } };
+    });
+    const o = orgApi({ rest: { git: { getTree } } });
+    const blobs = await o.listBlobs('repo', 'root');
+    expect(blobs.map((b) => b.path).sort()).toEqual(['.gitattributes', 'sub/a.bin']);
+  });
+});
+
+describe('getBlobs', () => {
+  test('batches aliases, maps text, null for truncated/missing', async () => {
+    const graphql = vi.fn().mockResolvedValue({
+      repository: {
+        b0: { text: 'ptr', isTruncated: false },
+        b1: { text: null, isTruncated: true },
+      },
+    });
+    const o = orgApi({ graphql });
+    const res = await o.getBlobs('repo', ['o0', 'o1']);
+    expect(res.get('o0')).toEqual({ text: 'ptr' });
+    expect(res.get('o1')).toEqual({ text: null });
+    expect(graphql.mock.calls[0][0]).toContain('object(oid: "o0")');
+  });
+
+  test('chunks into separate queries past the batch size', async () => {
+    const graphql = vi.fn().mockResolvedValue({ repository: {} });
+    const oids = Array.from({ length: 150 }, (_, i) => `o${i}`);
+    await orgApi({ graphql }).getBlobs('repo', oids);
+    expect(graphql).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('compare', () => {
+  test('maps status, files, totalCommits', async () => {
+    const o = orgApi({
+      rest: {
+        repos: {
+          compareCommitsWithBasehead: vi.fn().mockResolvedValue({
+            data: {
+              status: 'ahead',
+              total_commits: 2,
+              files: [{ filename: 'a.bin', status: 'modified' }],
+            },
+          }),
+        },
+      },
+    });
+    expect(await o.compare('repo', 'b', 'h')).toEqual({
+      status: 'ahead',
+      totalCommits: 2,
+      files: [{ filename: 'a.bin', status: 'modified' }],
+    });
+  });
+
+  test('null files → empty list', async () => {
+    const o = orgApi({
+      rest: {
+        repos: {
+          compareCommitsWithBasehead: vi
+            .fn()
+            .mockResolvedValue({ data: { status: 'identical', total_commits: 0, files: null } }),
+        },
+      },
+    });
+    expect((await o.compare('repo', 'b', 'h')).files).toEqual([]);
+  });
+});
+
 async function collect<T>(it: AsyncIterable<T>): Promise<T[]> {
   const out: T[] = [];
   for await (const x of it) out.push(x);
