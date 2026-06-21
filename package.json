@@ -7,6 +7,7 @@
     "./auth/session": "./src/auth/session.ts",
     "./crypto": "./src/crypto/index.ts",
     "./git/config": "./src/git/config/index.ts",
+    "./git/lfs": "./src/git/lfs/index.ts",
     "./github": "./src/github/index.ts",
     "./contracts": "./src/contracts/index.ts"
   },
