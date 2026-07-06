@@ -1,9 +1,29 @@
 import { describe, test, expect, vi } from 'vitest';
 
+import type { KvStore } from '../cache';
 import { GithubOrgApi } from './api-org';
 
 function orgApi(octokit: any, org = 'my-org'): GithubOrgApi {
   const o = new GithubOrgApi('t', org);
+  (o as { octokit: unknown }).octokit = octokit;
+  return o;
+}
+
+/** In-memory KV fake. */
+function fakeKv() {
+  const store = new Map<string, string>();
+  const kv = {
+    get: (k: string) => Promise.resolve(store.get(k) ?? null),
+    put: (k: string, v: string) => {
+      store.set(k, v);
+      return Promise.resolve();
+    },
+  } as unknown as KvStore;
+  return { kv, store };
+}
+
+function cachedOrgApi(octokit: any, kv: KvStore, org = 'my-org'): GithubOrgApi {
+  const o = new GithubOrgApi('t', org, kv);
   (o as { octokit: unknown }).octokit = octokit;
   return o;
 }
@@ -332,6 +352,118 @@ describe('compare', () => {
       },
     });
     expect((await o.compare('repo', 'b', 'h')).files).toEqual([]);
+  });
+});
+
+function membershipOrgApi(impl: { state?: string; role?: 'admin' | 'member'; reject?: number }) {
+  return orgApi({
+    rest: {
+      orgs: {
+        getMembershipForUser: () =>
+          impl.reject
+            ? Promise.reject(Object.assign(new Error(String(impl.reject)), { status: impl.reject }))
+            : Promise.resolve({ data: { state: impl.state, role: impl.role } }),
+      },
+    },
+  });
+}
+
+describe('orgMembership', () => {
+  test("returns 'admin' for active admin", async () => {
+    expect(await membershipOrgApi({ state: 'active', role: 'admin' }).orgMembership('bob')).toBe(
+      'admin',
+    );
+  });
+
+  test("returns 'member' for active member", async () => {
+    expect(await membershipOrgApi({ state: 'active', role: 'member' }).orgMembership('bob')).toBe(
+      'member',
+    );
+  });
+
+  test('returns null for pending membership', async () => {
+    expect(
+      await membershipOrgApi({ state: 'pending', role: 'member' }).orgMembership('bob'),
+    ).toBeNull();
+  });
+
+  test('returns null when API errors with 404', async () => {
+    expect(await membershipOrgApi({ reject: 404 }).orgMembership('bob')).toBeNull();
+  });
+
+  test('throws GithubError forbidden when API errors with 403', async () => {
+    await expect(membershipOrgApi({ reject: 403 }).orgMembership('bob')).rejects.toMatchObject({
+      code: 'forbidden',
+      status: 403,
+    });
+  });
+
+  test('caches role; second call skips Octokit', async () => {
+    const { kv } = fakeKv();
+    const getMembershipForUser = vi
+      .fn()
+      .mockResolvedValue({ data: { state: 'active', role: 'member' } });
+    const o = cachedOrgApi({ rest: { orgs: { getMembershipForUser } } }, kv);
+    expect(await o.orgMembership('bob')).toBe('member');
+    expect(await o.orgMembership('bob')).toBe('member');
+    expect(getMembershipForUser).toHaveBeenCalledTimes(1);
+  });
+});
+
+function permOrgApi(perm: string | Error) {
+  return orgApi({
+    rest: {
+      repos: {
+        getCollaboratorPermissionLevel: () =>
+          perm instanceof Error
+            ? Promise.reject(perm)
+            : Promise.resolve({ data: { permission: perm } }),
+      },
+    },
+  });
+}
+
+describe('repoPermission', () => {
+  test("returns 'write' for admin permission", async () => {
+    expect(await permOrgApi('admin').repoPermission('hub', 'bob')).toBe('write');
+  });
+
+  test("returns 'write' for write permission", async () => {
+    expect(await permOrgApi('write').repoPermission('hub', 'bob')).toBe('write');
+  });
+
+  test("returns 'read' for read permission", async () => {
+    expect(await permOrgApi('read').repoPermission('hub', 'bob')).toBe('read');
+  });
+
+  test("returns null for 'none' permission", async () => {
+    expect(await permOrgApi('none').repoPermission('hub', 'bob')).toBeNull();
+  });
+
+  test('returns null when API errors with 404', async () => {
+    expect(
+      await permOrgApi(Object.assign(new Error('404'), { status: 404 })).repoPermission(
+        'hub',
+        'bob',
+      ),
+    ).toBeNull();
+  });
+
+  test('throws GithubError forbidden when API errors with 403', async () => {
+    await expect(
+      permOrgApi(Object.assign(new Error('403'), { status: 403 })).repoPermission('hub', 'bob'),
+    ).rejects.toMatchObject({ code: 'forbidden', status: 403 });
+  });
+
+  test('caches access; second call skips Octokit', async () => {
+    const { kv } = fakeKv();
+    const getCollaboratorPermissionLevel = vi
+      .fn()
+      .mockResolvedValue({ data: { permission: 'write' } });
+    const o = cachedOrgApi({ rest: { repos: { getCollaboratorPermissionLevel } } }, kv);
+    expect(await o.repoPermission('hub', 'bob')).toBe('write');
+    expect(await o.repoPermission('hub', 'bob')).toBe('write');
+    expect(getCollaboratorPermissionLevel).toHaveBeenCalledTimes(1);
   });
 });
 

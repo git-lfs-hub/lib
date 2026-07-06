@@ -63,6 +63,27 @@ export class GithubApi {
     return GithubOrgApi.forInstallation(this, org.id, org.login);
   }
 
+  /**
+   * Mint an installation access token narrowed below the installation grant —
+   * `repositories` limits it to named repos, `permissions` to named scopes. Unlike
+   * `orgApi`/`forInstallation` (installation-wide), this bounds a per-job token's blast
+   * radius. App-JWT client only. Throws GithubError.
+   */
+  async mintInstallationToken(
+    installationId: number,
+    scope: { repositories?: string[]; permissions?: Record<string, string> },
+  ): Promise<string> {
+    try {
+      const res = await this.octokit.rest.apps.createInstallationAccessToken({
+        installation_id: installationId,
+        ...scope,
+      });
+      return (res.data as { token: string }).token;
+    } catch (e) {
+      throw mapHttpError(e, `createInstallationAccessToken (scoped) for installation ${installationId}`);
+    }
+  }
+
   async authenticatedUsername(): Promise<string | null> {
     if (this.cachedUsername) return this.cachedUsername;
     const login = await this.withCache(
@@ -112,7 +133,7 @@ export class GithubApi {
   }
 
   /** Cache read → `fetch` on miss → cache write on success. */
-  private async withCache<T extends string>(
+  protected async withCache<T extends string>(
     keyFn: () => Promise<string | null>,
     fetch: () => Promise<T | null>,
   ): Promise<T | null> {

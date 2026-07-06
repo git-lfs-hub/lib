@@ -364,6 +364,34 @@ describe('mapHttpError', () => {
   });
 });
 
+describe('mintInstallationToken', () => {
+  test('passes the scope through and returns the token', async () => {
+    const createInstallationAccessToken = vi.fn(async () => ({ data: { token: 'scoped-tok' } }));
+    const a = api({ rest: { apps: { createInstallationAccessToken } } });
+    const token = await a.mintInstallationToken(42, {
+      repositories: ['repoA'],
+      permissions: { contents: 'write' },
+    });
+    expect(token).toBe('scoped-tok');
+    expect(createInstallationAccessToken).toHaveBeenCalledWith({
+      installation_id: 42,
+      repositories: ['repoA'],
+      permissions: { contents: 'write' },
+    });
+  });
+
+  test('maps an API failure to GithubError', async () => {
+    const a = api({
+      rest: {
+        apps: {
+          createInstallationAccessToken: () => Promise.reject(new Error('boom')),
+        },
+      },
+    });
+    await expect(a.mintInstallationToken(1, {})).rejects.toBeInstanceOf(GithubError);
+  });
+});
+
 describe('forApp', () => {
   test('signs an RS256 App JWT and builds an authenticated client', async () => {
     const { publicKey, privateKey } = await generateKeyPair('RS256', {
