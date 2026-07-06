@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'vitest';
 
-import { keyBytes, hexToBytes, sha256hex } from './index';
+import { keyBytes, hexToBytes, sha256hex, signNodeCredential, verifyNodeCredential } from './index';
 
 describe('keyBytes', () => {
   test('decodes a hex secret to bytes', () => {
@@ -29,6 +29,29 @@ describe('sha256hex', () => {
     expect(await sha256hex('')).toBe(
       'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
     );
+  });
+});
+
+describe('node credential', () => {
+  const SECRET = 'fleet-secret';
+
+  test('a token signed for a node verifies', async () => {
+    const token = await signNodeCredential('node-1', SECRET);
+    expect(await verifyNodeCredential('node-1', token, SECRET)).toBe(true);
+  });
+
+  test('a token for another node fails', async () => {
+    const token = await signNodeCredential('node-1', SECRET);
+    expect(await verifyNodeCredential('node-2', token, SECRET)).toBe(false);
+  });
+
+  test('a token under another secret fails', async () => {
+    const token = await signNodeCredential('node-1', SECRET);
+    expect(await verifyNodeCredential('node-1', token, 'other-secret')).toBe(false);
+  });
+
+  test('a malformed token fails', async () => {
+    expect(await verifyNodeCredential('node-1', 'zz', SECRET)).toBe(false);
   });
 });
 
