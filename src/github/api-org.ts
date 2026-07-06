@@ -1,4 +1,5 @@
-import { GithubApi } from './api';
+import type { KvStore } from '../cache';
+import { GithubApi, type RepoAccess } from './api';
 import { isHttpError, mapHttpError } from './errors';
 
 /** One repo from a `scanRepos` sweep. `lfsconfig` null = file absent; `{ text: null }` = present
@@ -15,8 +16,8 @@ export type RepoScan = {
 export class GithubOrgApi extends GithubApi {
   readonly org: string;
 
-  constructor(token: string, org: string) {
-    super(token);
+  constructor(token: string, org: string, kv?: KvStore) {
+    super(token, kv);
     this.org = org;
   }
 
@@ -30,16 +31,67 @@ export class GithubOrgApi extends GithubApi {
     app: GithubApi,
     installationId: number,
     account: string,
+    kv?: KvStore,
   ): Promise<GithubOrgApi> {
     try {
       const res = await app.octokit.rest.apps.createInstallationAccessToken({
         installation_id: installationId,
       });
       const token = (res.data as { token: string }).token;
-      return new GithubOrgApi(token, account);
+      return new GithubOrgApi(token, account, kv);
     } catch (e) {
       throw mapHttpError(e, `createInstallationAccessToken for ${account}`);
     }
+  }
+
+  /**
+   * Active org-membership role for a **named** user (App-side, via the installation
+   * token) — the node-owner revalidation lookup, keyed by the enrollment-bound user's
+   * login. `null` when the user is not an active member. Throws GithubError on failure.
+   */
+  async orgMembership(username: string): Promise<'admin' | 'member' | null> {
+    return this.withCache(
+      async () => `${username}:${this.org}:membership:access`.toLowerCase(),
+      async () => {
+        try {
+          const { data } = await this.octokit.rest.orgs.getMembershipForUser({
+            org: this.org,
+            username,
+          });
+          if (data.state !== 'active') return null;
+          return data.role === 'admin' ? 'admin' : 'member';
+        } catch (e) {
+          if (isHttpError(e) && e.status === 404) return null;
+          throw mapHttpError(e, `getMembershipForUser ${this.org}/${username}`);
+        }
+      },
+    );
+  }
+
+  /**
+   * Repo access for a **named** user via the collaborator-permission endpoint (App-side)
+   * — the mint-time write check for a BYON node owner. `admin`/`write` → `'write'`,
+   * `read` → `'read'`, `none`/404 → `null`. Throws GithubError on other failures.
+   */
+  async repoPermission(repo: string, username: string): Promise<RepoAccess | null> {
+    return this.withCache(
+      async () => `${username}:${this.org}/${repo}:permission:access`.toLowerCase(),
+      async () => {
+        try {
+          const { data } = await this.octokit.rest.repos.getCollaboratorPermissionLevel({
+            owner: this.org,
+            repo,
+            username,
+          });
+          if (data.permission === 'admin' || data.permission === 'write') return 'write';
+          if (data.permission === 'read') return 'read';
+          return null;
+        } catch (e) {
+          if (isHttpError(e) && e.status === 404) return null;
+          throw mapHttpError(e, `getCollaboratorPermissionLevel ${this.org}/${repo}/${username}`);
+        }
+      },
+    );
   }
 
   /**
