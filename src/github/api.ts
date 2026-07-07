@@ -80,7 +80,10 @@ export class GithubApi {
       });
       return (res.data as { token: string }).token;
     } catch (e) {
-      throw mapHttpError(e, `createInstallationAccessToken (scoped) for installation ${installationId}`);
+      throw mapHttpError(
+        e,
+        `createInstallationAccessToken (scoped) for installation ${installationId}`,
+      );
     }
   }
 

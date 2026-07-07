@@ -4,4 +4,4 @@ export { resolveSession } from './resolve';
 export { authorizeOrgRole } from './authorizeOrgRole';
 export { orgsFromEnv, parseGithubList } from './orgs';
 export { authHeaderToken } from './header';
-export { verifyWebhookSignature } from './webhook';
+export { signWebhook, verifyWebhookSignature } from './webhook';
