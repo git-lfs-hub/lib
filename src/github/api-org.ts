@@ -1,4 +1,5 @@
 import type { KvStore } from '../cache';
+import { base64ToBytes } from '../crypto';
 import { GithubApi, type RepoAccess } from './api';
 import { isHttpError, mapHttpError } from './errors';
 
@@ -45,9 +46,9 @@ export class GithubOrgApi extends GithubApi {
   }
 
   /**
-   * Active org-membership role for a **named** user (App-side, via the installation
-   * token) — the node-owner revalidation lookup, keyed by the enrollment-bound user's
-   * login. `null` when the user is not an active member. Throws GithubError on failure.
+   * Active org-membership role for a **named** user (App-side, via the installation token) — the
+   * BYON node-owner placement gate, keyed by the enrollment-bound login. One call per (user, org),
+   * independent of repo count. `null` when the user is not an active member. Throws on failure.
    */
   async orgMembership(username: string): Promise<'admin' | 'member' | null> {
     return this.withCache(
@@ -307,7 +308,7 @@ export class GithubOrgApi extends GithubApi {
 
 /** Decode the Contents API's base64 blob (newline-wrapped) into UTF-8 text. */
 function decodeBase64Utf8(content: string): string {
-  const bytes = Uint8Array.from(atob(content.replace(/\s/g, '')), (c) => c.charCodeAt(0));
+  const bytes = base64ToBytes(content.replace(/\s/g, '')) ?? new Uint8Array();
   return new TextDecoder().decode(bytes);
 }
 
