@@ -1,19 +1,18 @@
-import { hexToBytes } from '../crypto';
+import { signHmac, verifyHmac } from '../crypto';
 
-// Verify a GitHub-style `sha256=<hex>` HMAC-SHA256 signature over a raw request body.
-// `crypto.subtle.verify` is constant-time, so decode the supplied hex and let it compare.
-// Missing/malformed/mismatched → false (fail closed); callers reject with 401 before parsing.
+// GitHub-style `sha256=<hex>` HMAC-SHA256 over a raw body — the outbound counterpart of
+// verifyWebhookSignature, so a receiver verifies with the same shared secret.
+export async function signWebhook(body: string, secret: string): Promise<string> {
+  return `sha256=${await signHmac(body, secret)}`;
+}
+
+// Verify a GitHub-style `sha256=<hex>` signature. Missing/malformed/mismatched → false (fail
+// closed); callers reject with 401 before parsing.
 export async function verifyWebhookSignature(
   body: string,
   signature: string | undefined,
   secret: string,
 ): Promise<boolean> {
   if (!signature?.startsWith('sha256=')) return false;
-  const provided = hexToBytes(signature.slice('sha256='.length));
-  if (!provided) return false;
-
-  const encoder = new TextEncoder();
-  const algo = { name: 'HMAC', hash: 'SHA-256' };
-  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), algo, false, ['verify']);
-  return crypto.subtle.verify('HMAC', key, provided, encoder.encode(body));
+  return verifyHmac(body, signature.slice('sha256='.length), secret);
 }

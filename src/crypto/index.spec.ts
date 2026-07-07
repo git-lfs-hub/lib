@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'vitest';
 
-import { keyBytes, hexToBytes, sha256hex, signNodeCredential, verifyNodeCredential } from './index';
+import { keyBytes, hexToBytes, sha256hex, signHmac, verifyHmac } from './index';
 
 describe('keyBytes', () => {
   test('decodes a hex secret to bytes', () => {
@@ -36,22 +36,22 @@ describe('node credential', () => {
   const SECRET = 'fleet-secret';
 
   test('a token signed for a node verifies', async () => {
-    const token = await signNodeCredential('node-1', SECRET);
-    expect(await verifyNodeCredential('node-1', token, SECRET)).toBe(true);
+    const token = await signHmac('node-1', SECRET);
+    expect(await verifyHmac('node-1', token, SECRET)).toBe(true);
   });
 
   test('a token for another node fails', async () => {
-    const token = await signNodeCredential('node-1', SECRET);
-    expect(await verifyNodeCredential('node-2', token, SECRET)).toBe(false);
+    const token = await signHmac('node-1', SECRET);
+    expect(await verifyHmac('node-2', token, SECRET)).toBe(false);
   });
 
   test('a token under another secret fails', async () => {
-    const token = await signNodeCredential('node-1', SECRET);
-    expect(await verifyNodeCredential('node-1', token, 'other-secret')).toBe(false);
+    const token = await signHmac('node-1', SECRET);
+    expect(await verifyHmac('node-1', token, 'other-secret')).toBe(false);
   });
 
   test('a malformed token fails', async () => {
-    expect(await verifyNodeCredential('node-1', 'zz', SECRET)).toBe(false);
+    expect(await verifyHmac('node-1', 'zz', SECRET)).toBe(false);
   });
 });
 
