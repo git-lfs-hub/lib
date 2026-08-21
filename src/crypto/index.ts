@@ -11,9 +11,8 @@ export function keyBytes(secret?: string): Uint8Array {
   return bytes;
 }
 
-// HMAC-SHA256(secret, message) as hex, with a constant-time verify. A keyed token over an
-// arbitrary message — e.g. a per-node WS credential derived from the fleet secret, so a managed
-// node stores no secret and the secret alone gates forgery.
+// A per-node WS credential derives from the fleet secret, so a managed node stores no secret
+// and the secret alone gates forgery.
 const HMAC = { name: 'HMAC', hash: 'SHA-256' } as const;
 
 export async function signHmac(message: string, secret: string): Promise<string> {
@@ -33,12 +32,10 @@ function hmacKey(secret: string, usages: ('sign' | 'verify')[]): Promise<CryptoK
   return crypto.subtle.importKey('raw', new TextEncoder().encode(secret), HMAC, false, usages);
 }
 
-// Ed25519 node identity (P2): the node generates the keypair, the server stores only the public
-// key. The node authenticates its WS upgrade by signing a fresh challenge — possession of the
-// private key is the credential; the `nodeId` is a non-secret identifier.
+// Node identity: the server stores only the public key, so signing a fresh challenge is the
+// credential and `nodeId` stays a non-secret identifier.
 const ED25519 = { name: 'Ed25519' } as const;
 
-// Base64 spki public + base64 pkcs8 private — portable across runtimes and workerd.
 export async function generateKeypair(): Promise<{ publicKey: string; privateKey: string }> {
   const pair = (await crypto.subtle.generateKey(ED25519, true, ['sign', 'verify'])) as {
     publicKey: CryptoKey;
@@ -79,8 +76,7 @@ export async function verifyChallenge(
   }
 }
 
-// Base64 ↔ raw bytes. `base64ToBytes` returns null on invalid input (untrusted data must fail
-// closed); pair with a TextDecoder for base64 → UTF-8 text.
+// `base64ToBytes` returns null on invalid input — untrusted data must fail closed.
 export function bytesToBase64(bytes: Uint8Array): string {
   let s = '';
   for (const b of bytes) s += String.fromCharCode(b);

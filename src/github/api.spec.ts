@@ -1,13 +1,14 @@
 import { generateKeyPair, exportPKCS8, jwtVerify } from 'jose';
-import { describe, test, expect, vi } from 'vitest';
+import { describe, test, expect, vi, afterEach } from 'vitest';
 
 import type { KvStore } from '../cache';
+import { sha256hex } from '../crypto';
 import { GithubApi } from './api';
 import { GithubOrgApi } from './api-org';
 import { GithubError, mapHttpError } from './errors';
 
-function api(octokit: any): GithubApi {
-  const a = new GithubApi('t');
+function api(octokit: any, token = 't'): GithubApi {
+  const a = new GithubApi(token);
   (a as { octokit: unknown }).octokit = octokit;
   return a;
 }
@@ -15,18 +16,20 @@ function api(octokit: any): GithubApi {
 /** In-memory KV fake. */
 function fakeKv() {
   const store = new Map<string, string>();
+  const ttls = new Map<string, number | undefined>();
   const kv = {
     get: (k: string) => Promise.resolve(store.get(k) ?? null),
-    put: (k: string, v: string) => {
+    put: (k: string, v: string, o?: { expirationTtl?: number }) => {
       store.set(k, v);
+      ttls.set(k, o?.expirationTtl);
       return Promise.resolve();
     },
   } as unknown as KvStore;
-  return { kv, store };
+  return { kv, store, ttls };
 }
 
-function cachedApi(octokit: any, kv: KvStore): GithubApi {
-  const a = new GithubApi('t', kv);
+function cachedApi(octokit: any, kv: KvStore, token = 't'): GithubApi {
+  const a = new GithubApi(token, kv);
   (a as { octokit: unknown }).octokit = octokit;
   return a;
 }
@@ -52,6 +55,13 @@ describe('authenticatedUsername', () => {
       },
     });
     expect(await a.authenticatedUsername()).toBeNull();
+  });
+
+  test('returns null for an App token without probing GET /user', async () => {
+    const getAuthenticated = vi.fn();
+    const a = api({ rest: { users: { getAuthenticated } } }, 'ghs_x');
+    expect(await a.authenticatedUsername()).toBeNull();
+    expect(getAuthenticated).not.toHaveBeenCalled();
   });
 });
 
@@ -103,6 +113,61 @@ describe('orgRole', () => {
   });
 });
 
+describe('callerAccess', () => {
+  const PROJECTS = ['Acme'];
+  afterEach(() => vi.unstubAllGlobals());
+
+  test('a user token answers from the repo permissions, ignoring the projects orgs', async () => {
+    expect(await repoApi({ push: true }).callerAccess('acme', 'hub', [])).toBe('write');
+  });
+
+  test("an App token that may push a projects-org repo gets 'write'", async () => {
+    const { a } = pushApi();
+    expect(await a.callerAccess('acme', 'hub', PROJECTS)).toBe('write');
+  });
+
+  test('org matching is case-insensitive', async () => {
+    const { a } = pushApi();
+    expect(await a.callerAccess('ACME', 'hub', ['acme'])).toBe('write');
+  });
+
+  test('any configured projects org matches', async () => {
+    const { a } = pushApi({ full_name: 'second/hub' });
+    expect(await a.callerAccess('acme', 'hub', ['acme', 'second'])).toBe('write');
+  });
+
+  test('an App token is denied for a repo outside every projects org', async () => {
+    const { a } = pushApi({ full_name: 'other/hub' });
+    expect(await a.callerAccess('other', 'hub', PROJECTS)).toBeNull();
+  });
+
+  test('a projects-org repo the token cannot push is denied', async () => {
+    const { a } = pushApi({}, 403);
+    expect(await a.callerAccess('acme', 'hub', PROJECTS)).toBeNull();
+  });
+
+  test('no projects orgs denies App tokens without asking GitHub', async () => {
+    const { a, get } = pushApi();
+    expect(await a.callerAccess('acme', 'hub', [])).toBeNull();
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  test('a repo transferred out of the projects org is denied under its old namespace', async () => {
+    const { a } = pushApi({ full_name: 'other/hub' });
+    expect(await a.callerAccess('acme', 'hub', PROJECTS)).toBeNull();
+  });
+
+  test('omitting the projects orgs grants any repo the token may push', async () => {
+    const { a } = pushApi({ full_name: 'platform/hub' });
+    expect(await a.callerAccess('platform', 'hub')).toBe('write');
+  });
+
+  test('omitting them still denies a repo the token may not push', async () => {
+    const { a } = pushApi({ full_name: 'platform/hub' }, 403);
+    expect(await a.callerAccess('platform', 'hub')).toBeNull();
+  });
+});
+
 function repoApi(
   permissions: { push?: boolean; admin?: boolean; pull?: boolean } | undefined | Error,
 ) {
@@ -139,6 +204,82 @@ describe('repoAccess', () => {
 
   test('returns null when repo lookup fails', async () => {
     expect(await repoApi(new Error('404')).repoAccess('o', 'r')).toBeNull();
+  });
+});
+
+/** `repos.get` plus a stubbed receive-pack advertisement — the App-token push probe. */
+function pushApi(
+  repo: { full_name?: string } | Error = {},
+  advertised = 200,
+  token = 'ghs_x',
+  kv?: KvStore,
+) {
+  const get = vi.fn(() =>
+    repo instanceof Error
+      ? Promise.reject(repo)
+      : Promise.resolve({ data: { full_name: 'acme/hub', ...repo } }),
+  );
+  const probe = vi.fn((_url: string, _init?: RequestInit) =>
+    Promise.resolve(new Response('refs', { status: advertised })),
+  );
+  vi.stubGlobal('fetch', probe);
+  const octokit = { rest: { repos: { get } } };
+  const a = kv ? cachedApi(octokit, kv, token) : api(octokit, token);
+  return { a, get, probe };
+}
+
+describe('appPushableRepo', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  test('a 200 advertisement means the token may push', async () => {
+    const { a, probe } = pushApi();
+    expect(await a.appPushableRepo('acme', 'hub')).toBe('acme/hub');
+    expect(probe).toHaveBeenCalledWith(
+      'https://github.com/acme/hub.git/info/refs?service=git-receive-pack',
+      {
+        headers: expect.objectContaining({
+          Authorization: `Basic ${btoa('x-access-token:ghs_x')}`,
+        }),
+      },
+    );
+  });
+
+  test('probes where a transferred repo lives now, not the namespace asked for', async () => {
+    const { a, probe } = pushApi({ full_name: 'projects/hub' });
+    expect(await a.appPushableRepo('acme', 'hub')).toBe('projects/hub');
+    expect(probe.mock.calls[0][0]).toContain('/projects/hub.git/');
+  });
+
+  test('403 means the token may not push, public repo included', async () => {
+    const { a } = pushApi({ full_name: 'octocat/Hello-World' }, 403);
+    expect(await a.appPushableRepo('octocat', 'Hello-World')).toBeNull();
+  });
+
+  test('404 means the repo is out of reach', async () => {
+    const { a } = pushApi({}, 404);
+    expect(await a.appPushableRepo('acme', 'hub')).toBeNull();
+  });
+
+  test('a 404 on the repo lookup denies without probing', async () => {
+    const { a, probe } = pushApi(Object.assign(new Error('404'), { status: 404 }));
+    expect(await a.appPushableRepo('acme', 'hub')).toBeNull();
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  test('throws GithubError when the repo lookup fails for another reason', async () => {
+    const { a } = pushApi(Object.assign(new Error('500'), { status: 500 }));
+    await expect(a.appPushableRepo('acme', 'hub')).rejects.toMatchObject({
+      code: 'transient',
+      status: 500,
+    });
+  });
+
+  test('throws GithubError on an unexpected advertisement status', async () => {
+    const { a } = pushApi({}, 500);
+    await expect(a.appPushableRepo('acme', 'hub')).rejects.toMatchObject({
+      code: 'transient',
+      status: 500,
+    });
   });
 });
 
@@ -228,6 +369,8 @@ describe('orgApi', () => {
 });
 
 describe('cache', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   test('authenticatedUsername caches login; second call skips Octokit', async () => {
     const { kv } = fakeKv();
     const getAuthenticated = vi.fn(() => Promise.resolve({ data: { login: 'alice' } }));
@@ -284,6 +427,48 @@ describe('cache', () => {
     expect(store.has('alice:acme:access')).toBe(false);
   });
 
+  test('the push proof is cached per repo, on its own suffix and TTL', async () => {
+    const { kv, store, ttls } = fakeKv();
+    const { a, get } = pushApi({}, 200, 'ghs_x', kv);
+    expect(await a.callerAccess('acme', 'hub', ['acme'])).toBe('write');
+    expect(await a.callerAccess('acme', 'hub', ['acme'])).toBe('write');
+    expect(get).toHaveBeenCalledTimes(1);
+    const key = `${await sha256hex('ghs_x')}:acme/hub:app-push`;
+    expect(store.get(key)).toBe('acme/hub');
+    expect(ttls.get(key)).toBe(3600);
+  });
+
+  test('an App caller that cannot push re-verifies rather than caching the denial', async () => {
+    const { kv, store } = fakeKv();
+    const { a, get } = pushApi({}, 403, 'ghs_x', kv);
+    expect(await a.callerAccess('acme', 'hub', ['acme'])).toBeNull();
+    expect(await a.callerAccess('acme', 'hub', ['acme'])).toBeNull();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(store.size).toBe(0);
+  });
+
+  test('what is cached is the proof, so the projects-org gate still runs on a hit', async () => {
+    const { kv } = fakeKv();
+    const { a } = pushApi({ full_name: 'platform/hub' }, 200, 'ghs_x', kv);
+    expect(await a.callerAccess('platform', 'hub')).toBe('write'); // LFS: no gate, fills the entry
+    expect(await a.callerAccess('platform', 'hub', ['acme'])).toBeNull(); // submit: gate denies
+  });
+
+  test('the user path keeps its own suffix and TTL', async () => {
+    const { kv, ttls } = fakeKv();
+    const a = cachedApi(
+      {
+        rest: {
+          users: { getAuthenticated: () => Promise.resolve({ data: { login: 'alice' } }) },
+          repos: { get: () => Promise.resolve({ data: { permissions: { push: true } } }) },
+        },
+      },
+      kv,
+    );
+    await a.callerAccess('acme', 'hub', ['acme']);
+    expect(ttls.get('alice:acme/hub:access')).toBe(300);
+  });
+
   test('repoAccess caches access; second call skips Octokit', async () => {
     const { kv } = fakeKv();
     const get = vi.fn(() => Promise.resolve({ data: { permissions: { push: true } } }));
@@ -314,6 +499,50 @@ describe('cache', () => {
     );
     expect(await a.repoAccess('acme', 'hub')).toBeNull();
     expect(store.has('alice:acme/hub:access')).toBe(false);
+  });
+
+  test('App token keys the access cache by token hash', async () => {
+    const { kv, store } = fakeKv();
+    const get = vi.fn(() => Promise.resolve({ data: { permissions: { pull: true } } }));
+    const a = cachedApi({ rest: { repos: { get } } }, kv, 'ghs_x');
+    expect(await a.repoAccess('acme', 'hub')).toBe('read');
+    expect(await a.repoAccess('acme', 'hub')).toBe('read');
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(store.has(`${await sha256hex('ghs_x')}:acme/hub:app-push`)).toBe(true);
+  });
+
+  test('a user token whose login will not resolve still caches, keyed by token hash', async () => {
+    const { kv, store } = fakeKv();
+    const a = cachedApi(
+      {
+        rest: {
+          users: { getAuthenticated: () => Promise.reject(new Error('403')) },
+          repos: { get: () => Promise.resolve({ data: { permissions: { push: true } } }) },
+        },
+      },
+      kv,
+      'ghp_x',
+    );
+    expect(await a.repoAccess('acme', 'hub')).toBe('write');
+    expect(store.has(`${await sha256hex('ghp_x')}:acme/hub:access`)).toBe(true);
+  });
+
+  test('a narrower App token cannot read a broader one’s entry', async () => {
+    const { kv } = fakeKv();
+    const wide = cachedApi(
+      {
+        rest: { repos: { get: () => Promise.resolve({ data: { permissions: { push: true } } }) } },
+      },
+      kv,
+      'ghs_wide',
+    );
+    const narrow = cachedApi(
+      { rest: { repos: { get: () => Promise.reject(new Error('404')) } } },
+      kv,
+      'ghs_narrow',
+    );
+    expect(await wide.repoAccess('acme', 'hub')).toBe('write');
+    expect(await narrow.repoAccess('acme', 'hub')).toBeNull();
   });
 
   test('username resolved once across orgRole and repoAccess', async () => {
