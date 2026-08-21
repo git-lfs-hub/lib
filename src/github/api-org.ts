@@ -46,9 +46,8 @@ export class GithubOrgApi extends GithubApi {
   }
 
   /**
-   * Active org-membership role for a **named** user (App-side, via the installation token) — the
-   * BYON node-owner placement gate, keyed by the enrollment-bound login. One call per (user, org),
-   * independent of repo count. `null` when the user is not an active member. Throws on failure.
+   * A **named** user, App-side — the BYON placement gate runs while the operator is offline, so
+   * it cannot use `orgRole`'s authenticated-user endpoint. `null` when not an active member.
    */
   async orgMembership(username: string): Promise<'admin' | 'member' | null> {
     return this.withCache(
@@ -70,9 +69,8 @@ export class GithubOrgApi extends GithubApi {
   }
 
   /**
-   * Repo access for a **named** user via the collaborator-permission endpoint (App-side)
-   * — the mint-time write check for a BYON node owner. `admin`/`write` → `'write'`,
-   * `read` → `'read'`, `none`/404 → `null`. Throws GithubError on other failures.
+   * A **named** user, App-side — the mint-time write check for a BYON node owner.
+   * `none`/404 → `null`. Throws GithubError on other failures.
    */
   async repoPermission(repo: string, username: string): Promise<RepoAccess | null> {
     return this.withCache(

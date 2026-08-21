@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 
-import { orgsFromEnv, parseGithubList } from './orgs';
+import { orgsFromEnv, parseGithubList, orgList } from './orgs';
 
 describe('parseGithubList', () => {
   test('undefined → empty', () => {
@@ -13,6 +13,20 @@ describe('parseGithubList', () => {
 
   test('splits on spaces, commas, semicolons and drops blanks', () => {
     expect(parseGithubList(' foo, bar;baz   qux ')).toEqual(['foo', 'bar', 'baz', 'qux']);
+  });
+});
+
+describe('orgList', () => {
+  test('array passes through, blanks dropped', () => {
+    expect(orgList(['a', '', 'b'])).toEqual(['a', 'b']);
+  });
+
+  test('string is split like GITHUB_ORGS', () => {
+    expect(orgList('a, b')).toEqual(['a', 'b']);
+  });
+
+  test('undefined → empty', () => {
+    expect(orgList(undefined)).toEqual([]);
   });
 });
 

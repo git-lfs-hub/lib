@@ -12,3 +12,8 @@ export function parseGithubList(s: string | undefined): string[] {
   if (!s) return [];
   return s.split(/[,;\s]+/).filter(Boolean);
 }
+
+/** Slug list from a JSON var, where `vars.json` may spell it as a string or an array. */
+export function orgList(v: string | string[] | undefined): string[] {
+  return Array.isArray(v) ? v.filter(Boolean) : parseGithubList(v);
+}
