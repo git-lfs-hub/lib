@@ -2,7 +2,8 @@ import { Octokit } from '@octokit/rest';
 import { SignJWT, importPKCS8 } from 'jose';
 
 import { Cache, type KvStore } from '../cache';
-import { sha256hex } from '../crypto';
+import { decodeBase64Utf8, sha256hex } from '../crypto';
+import { parseLfsConfig } from '../git/lfs';
 import type { GithubOrgApi } from './api-org';
 import { isHttpError, mapHttpError } from './errors';
 
@@ -19,9 +20,11 @@ const CACHE_TTL = {
   // Keyed by token hash, so a permission change mints a new token and misses. Only revocation
   // can go stale, bounded by an installation token's own life.
   ':app-push': 3600,
+  ':lfsconfig': 3600, // repo -> declared LFS prefix 1 hour
 };
 
 const APP_TOKEN_PREFIX = 'ghs_';
+const NO_LFS_LINK = '-';
 
 export class GithubApi {
   readonly octokit: Octokit;
@@ -41,11 +44,8 @@ export class GithubApi {
     return new GithubApi(await signAppJwt(appId, appPrivateKey));
   }
 
-  /**
-   * Every account the App is installed on — the authoritative set of owners to
-   * reconcile. Paginate `GET /app/installations` (App-JWT). User and org installs
-   * alike; the caller treats each `login` as an owner.
-   */
+  /** Every account the App is installed on (App-JWT), user and org alike — the authoritative
+   *  owner set to reconcile. */
   async installedOrgs(): Promise<InstalledOrg[]> {
     const out: InstalledOrg[] = [];
     const iter = this.octokit.paginate.iterator(this.octokit.rest.apps.listInstallations, {
@@ -109,11 +109,8 @@ export class GithubApi {
     return login;
   }
 
-  /**
-   * Active org membership role for the authenticated user, or `null` when the
-   * user is not an active member. Throws GithubError on API failure (e.g.
-   * `forbidden` when the token cannot read org membership).
-   */
+  /** Membership role, or null when not an active member. Throws GithubError on API failure —
+   *  `forbidden` when the token cannot read org membership. */
   async orgRole(org: string): Promise<'admin' | 'member' | null> {
     return this.withCache(
       () => this.accessKey(org),
@@ -130,11 +127,8 @@ export class GithubApi {
     );
   }
 
-  /**
-   * `projectsOrgs` confines App callers to repos in those orgs — pass it where the grant makes
-   * *another* principal push (a submit hands the job to the fleet), `[]` to reject App callers,
-   * omit it where the caller pushes its own bytes (LFS).
-   */
+  /** `projectsOrgs` confines App callers to those orgs — pass it where the grant makes *another*
+   *  principal push, `[]` to reject App callers, omit it where the caller pushes its own bytes. */
   async callerAccess(
     owner: string,
     repo: string,
@@ -167,12 +161,38 @@ export class GithubApi {
     );
   }
 
-  /**
-   * An installation token cannot convey its level over REST (`permissions` comes back all-false),
-   * but the receive-pack advertisement answers about push directly and writes nothing. Returns the
-   * repo's current `owner/repo` — a moved repo keeps its `.lfsconfig`, so the caller's segments
-   * are a routing key.
-   */
+  /** The prefix `owner/repo`'s `.lfsconfig` names on `host`; null when absent, unparseable, or
+   *  another host. A repo fact, not a verdict — safe to share across callers. */
+  async declaredLfsPrefix(owner: string, repo: string, host: string): Promise<string | null> {
+    const hit = await this.withCache(
+      () => Promise.resolve(`${owner}/${repo}:lfsconfig`.toLowerCase()),
+      async () => {
+        const file = await this.repoFile(owner, repo, '.lfsconfig');
+        const cfg = file ? parseLfsConfig(file) : null;
+        return cfg?.status === 'ok' ? `${cfg.host}\t${cfg.prefix}` : NO_LFS_LINK;
+      },
+    );
+    if (!hit || hit === NO_LFS_LINK) return null;
+    // Host cached beside the prefix, so one entry serves every deployment on this KV namespace.
+    const [cfgHost, prefix] = hit.split('\t');
+    return cfgHost === host.toLowerCase() ? prefix : null;
+  }
+
+  /** One file's decoded UTF-8 text at the default ref; null when absent or not a regular file. */
+  async repoFile(owner: string, repo: string, path: string): Promise<string | null> {
+    let data;
+    try {
+      ({ data } = await this.octokit.rest.repos.getContent({ owner, repo, path }));
+    } catch (e) {
+      if (isHttpError(e) && (e.status === 404 || e.status === 403)) return null;
+      throw mapHttpError(e, `GET ${owner}/${repo}/${path}`);
+    }
+    if (Array.isArray(data) || data.type !== 'file') return null;
+    return data.encoding === 'base64' ? decodeBase64Utf8(data.content) : data.content;
+  }
+
+  /** REST reports an installation token's `permissions` all-false, but the receive-pack
+   *  advertisement answers push directly and writes nothing. Returns the repo's current name. */
   async appPushableRepo(owner: string, repo: string): Promise<string | null> {
     let fullName: string;
     try {

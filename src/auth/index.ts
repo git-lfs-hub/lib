@@ -2,6 +2,6 @@ export { githubOAuthUrl, oauthCallback, oauthErrorUrl, oauthSuccessUrl } from '.
 export { setSessionCookie, getSessionCookie, decryptSession, type SessionTokens } from './session';
 export { resolveSession } from './resolve';
 export { authorizeOrgRole } from './authorizeOrgRole';
-export { orgsFromEnv, parseGithubList, orgList } from './orgs';
+export { orgsFromEnv, parseGithubList, parseOrgsMap, orgList } from './orgs';
 export { authHeaderToken } from './header';
 export { signWebhook, verifyWebhookSignature } from './webhook';

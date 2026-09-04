@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 
-import { orgsFromEnv, parseGithubList, orgList } from './orgs';
+import { orgsFromEnv, parseGithubList, parseOrgsMap, orgList } from './orgs';
 
 describe('parseGithubList', () => {
   test('undefined → empty', () => {
@@ -13,6 +13,23 @@ describe('parseGithubList', () => {
 
   test('splits on spaces, commas, semicolons and drops blanks', () => {
     expect(parseGithubList(' foo, bar;baz   qux ')).toEqual(['foo', 'bar', 'baz', 'qux']);
+  });
+});
+
+describe('parseOrgsMap', () => {
+  test('undefined → empty', () => {
+    expect(parseOrgsMap(undefined)).toEqual([]);
+  });
+
+  test('splits pairs on the list separators and lowercases both sides', () => {
+    expect(parseOrgsMap('Staging=Prod, Other=Prod')).toEqual([
+      ['staging', 'prod'],
+      ['other', 'prod'],
+    ]);
+  });
+
+  test('drops entries missing a side', () => {
+    expect(parseOrgsMap('staging=prod bare =prod staging=')).toEqual([['staging', 'prod']]);
   });
 });
 

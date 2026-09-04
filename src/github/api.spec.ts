@@ -207,6 +207,95 @@ describe('repoAccess', () => {
   });
 });
 
+/** `repos.getContent` returning a base64 `.lfsconfig` blob, an error, or a directory listing. */
+function fileApi(content: string | Error | unknown[], kv?: KvStore, encoding = 'base64') {
+  const getContent = vi.fn(() => {
+    if (content instanceof Error) return Promise.reject(content);
+    if (Array.isArray(content)) return Promise.resolve({ data: content });
+    const text = content as string;
+    return Promise.resolve({
+      data: { type: 'file', encoding, content: encoding === 'base64' ? btoa(text) : text },
+    });
+  });
+  const octokit = { rest: { repos: { getContent } } };
+  const a = kv ? cachedApi(octokit, kv) : api(octokit);
+  return { a, getContent };
+}
+
+const LFSCONFIG = '[lfs]\n\turl = https://lfs.example.com/lfs/prod/hub\n';
+
+describe('declaredLfsPrefix', () => {
+  test('returns the declared prefix when the host matches', async () => {
+    const { a } = fileApi(LFSCONFIG);
+    expect(await a.declaredLfsPrefix('staging', 'hub', 'lfs.example.com')).toBe('prod/hub');
+  });
+
+  test('returns null when the config names another host', async () => {
+    const { a } = fileApi(LFSCONFIG);
+    expect(await a.declaredLfsPrefix('staging', 'hub', 'other.example.com')).toBeNull();
+  });
+
+  test('returns null when the file is absent', async () => {
+    const { a } = fileApi(Object.assign(new Error('nope'), { status: 404 }));
+    expect(await a.declaredLfsPrefix('staging', 'hub', 'lfs.example.com')).toBeNull();
+  });
+
+  test('returns null when the file has no lfs.url', async () => {
+    const { a } = fileApi('[core]\n\tbare = true\n');
+    expect(await a.declaredLfsPrefix('staging', 'hub', 'lfs.example.com')).toBeNull();
+  });
+
+  test('caches the parsed link under a token-independent key', async () => {
+    const { kv, store } = fakeKv();
+    const { a, getContent } = fileApi(LFSCONFIG, kv);
+    await a.declaredLfsPrefix('Staging', 'Hub', 'lfs.example.com');
+    await a.declaredLfsPrefix('Staging', 'Hub', 'lfs.example.com');
+    expect(getContent).toHaveBeenCalledTimes(1);
+    expect(store.get('staging/hub:lfsconfig')).toBe('lfs.example.com\tprod/hub');
+  });
+
+  test('caches the absence too, so a missing file is fetched once', async () => {
+    const { kv, store } = fakeKv();
+    const { a, getContent } = fileApi(Object.assign(new Error('nope'), { status: 404 }), kv);
+    await a.declaredLfsPrefix('staging', 'hub', 'lfs.example.com');
+    await a.declaredLfsPrefix('staging', 'hub', 'lfs.example.com');
+    expect(getContent).toHaveBeenCalledTimes(1);
+    expect(store.get('staging/hub:lfsconfig')).toBe('-');
+  });
+});
+
+describe('repoFile', () => {
+  test('decodes a base64 blob', async () => {
+    const { a } = fileApi('hello');
+    expect(await a.repoFile('o', 'r', '.lfsconfig')).toBe('hello');
+  });
+
+  test('returns null when the path is a directory', async () => {
+    const { a } = fileApi([{ type: 'file' }]);
+    expect(await a.repoFile('o', 'r', 'dir')).toBeNull();
+  });
+
+  test('returns null when the token cannot read the repo', async () => {
+    const { a } = fileApi(Object.assign(new Error('forbidden'), { status: 403 }));
+    expect(await a.repoFile('o', 'r', '.lfsconfig')).toBeNull();
+  });
+
+  test('passes through content that is not base64-encoded', async () => {
+    const { a } = fileApi('plain', undefined, 'none');
+    expect(await a.repoFile('o', 'r', '.lfsconfig')).toBe('plain');
+  });
+
+  test('throws on any other failure', async () => {
+    const { a } = fileApi(Object.assign(new Error('boom'), { status: 500 }));
+    await expect(a.repoFile('o', 'r', '.lfsconfig')).rejects.toThrow(GithubError);
+  });
+
+  test('throws when the failure is not an HTTP error', async () => {
+    const { a } = fileApi(new Error('network down'));
+    await expect(a.repoFile('o', 'r', '.lfsconfig')).rejects.toThrow(GithubError);
+  });
+});
+
 /** `repos.get` plus a stubbed receive-pack advertisement — the App-token push probe. */
 function pushApi(
   repo: { full_name?: string } | Error = {},

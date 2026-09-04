@@ -1,5 +1,5 @@
 import type { KvStore } from '../cache';
-import { base64ToBytes } from '../crypto';
+import { decodeBase64Utf8 } from '../crypto';
 import { GithubApi, type RepoAccess } from './api';
 import { isHttpError, mapHttpError } from './errors';
 
@@ -302,12 +302,6 @@ export class GithubOrgApi extends GithubApi {
       throw mapHttpError(e, `compare ${this.org}/${repo} ${base}...${head}`);
     }
   }
-}
-
-/** Decode the Contents API's base64 blob (newline-wrapped) into UTF-8 text. */
-function decodeBase64Utf8(content: string): string {
-  const bytes = base64ToBytes(content.replace(/\s/g, '')) ?? new Uint8Array();
-  return new TextDecoder().decode(bytes);
 }
 
 type RepoNode = {
