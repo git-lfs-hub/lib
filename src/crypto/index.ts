@@ -94,6 +94,12 @@ export function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> | null {
   }
 }
 
+/** Decode the Contents API's base64 blob (newline-wrapped) into UTF-8 text. */
+export function decodeBase64Utf8(content: string): string {
+  const bytes = base64ToBytes(content.replace(/\s/g, '')) ?? new Uint8Array();
+  return new TextDecoder().decode(bytes);
+}
+
 // Decode a hex string to bytes; null on empty / odd length / non-hex. Used for untrusted
 // input (e.g. a webhook `sha256=<hex>` signature) where a bad value must fail closed.
 export function hexToBytes(hex: string): Uint8Array<ArrayBuffer> | null {
