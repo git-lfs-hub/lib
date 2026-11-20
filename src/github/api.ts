@@ -17,9 +17,9 @@ type InstalledOrg = { login: string; id: number };
 const CACHE_TTL = {
   ':user': 86400, // token -> user 1 day
   ':access': 300, // user -> access 5 min
-  // Keyed by token hash, so a permission change mints a new token and misses. Only revocation
-  // can go stale, bounded by an installation token's own life.
-  ':app-push': 3600,
+  // Keyed by token hash, so a permission change mints a new token and misses. The TTL bounds
+  // how long a revoked token keeps working.
+  ':app-access': 300,
   ':lfsconfig': 3600, // repo -> declared LFS prefix 1 hour
 };
 
@@ -136,16 +136,17 @@ export class GithubApi {
   ): Promise<RepoAccess | null> {
     if (!this.isAppToken) return this.repoAccess(owner, repo);
     if (projectsOrgs && !projectsOrgs.length) return null;
-    // Cache the push proof — a GitHub fact — never the gated verdict: lfs-server and lfs-compute
+    // Cache the access proof — a GitHub fact — never the gated verdict: lfs-server and lfs-compute
     // share one KV namespace, so an ungated verdict would be read by the caller that needs the gate.
-    const pushable = await this.withCache(
+    const proof = await this.withCache(
       () => this.accessKey(`${owner}/${repo}`),
-      () => this.appPushableRepo(owner, repo),
+      () => this.appRepoAccess(owner, repo),
     );
-    if (!pushable) return null;
-    if (!projectsOrgs) return 'write';
-    const found = pushable.split('/')[0].toLowerCase();
-    return projectsOrgs.some((org) => org.toLowerCase() === found) ? 'write' : null;
+    if (!proof) return null;
+    const [fullName, access] = proof.split('\t') as [string, RepoAccess];
+    if (!projectsOrgs) return access;
+    const found = fullName.split('/')[0].toLowerCase();
+    return projectsOrgs.some((org) => org.toLowerCase() === found) ? access : null;
   }
 
   async repoAccess(owner: string, repo: string): Promise<RepoAccess | null> {
@@ -191,30 +192,34 @@ export class GithubApi {
     return data.encoding === 'base64' ? decodeBase64Utf8(data.content) : data.content;
   }
 
-  /** REST reports an installation token's `permissions` all-false, but the receive-pack
-   *  advertisement answers push directly and writes nothing. Returns the repo's current name. */
-  async appPushableRepo(owner: string, repo: string): Promise<string | null> {
+  /** REST reports an installation token's `permissions` all-false, but the receive-/upload-pack
+   *  advertisements answer push and pull directly and write nothing. `{full_name}\t{access}`. */
+  async appRepoAccess(owner: string, repo: string): Promise<string | null> {
     let fullName: string;
     try {
       fullName = (await this.octokit.rest.repos.get({ owner, repo })).data.full_name;
     } catch (e) {
-      if (isHttpError(e) && e.status === 404) return null;
+      // 401: revoked or expired token.
+      if (isHttpError(e) && (e.status === 404 || e.status === 401)) return null;
       throw mapHttpError(e, `repos.get for ${owner}/${repo}`);
     }
-    const res = await fetch(
-      `https://github.com/${fullName}.git/info/refs?service=git-receive-pack`,
-      {
-        headers: {
-          Authorization: `Basic ${btoa(`x-access-token:${this.token}`)}`,
-          'User-Agent': USER_AGENT,
-        },
+    if (await this.advertises(fullName, 'git-receive-pack')) return `${fullName}\twrite`;
+    if (await this.advertises(fullName, 'git-upload-pack')) return `${fullName}\tread`;
+    return null;
+  }
+
+  private async advertises(fullName: string, service: string): Promise<boolean> {
+    const res = await fetch(`https://github.com/${fullName}.git/info/refs?service=${service}`, {
+      headers: {
+        Authorization: `Basic ${btoa(`x-access-token:${this.token}`)}`,
+        'User-Agent': USER_AGENT,
       },
-    );
-    // The body is the whole ref advertisement — push has no protocol-v2 slim form.
+    });
+    // The body is the whole ref advertisement; only the status matters.
     await res.body?.cancel();
-    if (res.status === 200) return fullName;
-    if (res.status === 403 || res.status === 404) return null;
-    throw mapHttpError({ status: res.status, message: '' }, `receive-pack for ${fullName}`);
+    if (res.status === 200) return true;
+    if (res.status === 401 || res.status === 403 || res.status === 404) return false;
+    throw mapHttpError({ status: res.status, message: '' }, `${service} for ${fullName}`);
   }
 
   /** Cache read → `fetch` on miss → cache write on success. */
@@ -242,7 +247,7 @@ export class GithubApi {
    * The App bucket has its own suffix so its TTL tunes apart from the user path's.
    */
   private async accessKey(scope: string): Promise<string> {
-    if (this.isAppToken) return `${await sha256hex(this.token)}:${scope}:app-push`.toLowerCase();
+    if (this.isAppToken) return `${await sha256hex(this.token)}:${scope}:app-access`.toLowerCase();
     const user = await this.authenticatedUsername();
     const principal = user ?? (await sha256hex(this.token));
     return `${principal}:${scope}:access`.toLowerCase();

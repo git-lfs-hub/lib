@@ -141,9 +141,14 @@ describe('callerAccess', () => {
     expect(await a.callerAccess('other', 'hub', PROJECTS)).toBeNull();
   });
 
-  test('a projects-org repo the token cannot push is denied', async () => {
+  test('a projects-org repo the token cannot reach is denied', async () => {
     const { a } = pushApi({}, 403);
     expect(await a.callerAccess('acme', 'hub', PROJECTS)).toBeNull();
+  });
+
+  test("a read-only grant on a projects-org repo gets 'read', never 'write'", async () => {
+    const { a } = pushApi({}, [403, 200]);
+    expect(await a.callerAccess('acme', 'hub', PROJECTS)).toBe('read');
   });
 
   test('no projects orgs denies App tokens without asking GitHub', async () => {
@@ -162,7 +167,12 @@ describe('callerAccess', () => {
     expect(await a.callerAccess('platform', 'hub')).toBe('write');
   });
 
-  test('omitting them still denies a repo the token may not push', async () => {
+  test("omitting them gives a read-only grant 'read'", async () => {
+    const { a } = pushApi({ full_name: 'platform/hub' }, [403, 200]);
+    expect(await a.callerAccess('platform', 'hub')).toBe('read');
+  });
+
+  test('omitting them still denies a repo the token cannot reach', async () => {
     const { a } = pushApi({ full_name: 'platform/hub' }, 403);
     expect(await a.callerAccess('platform', 'hub')).toBeNull();
   });
@@ -297,9 +307,10 @@ describe('repoFile', () => {
 });
 
 /** `repos.get` plus a stubbed receive-pack advertisement — the App-token push probe. */
+/** `advertised`: one status for both services, or `[receive-pack, upload-pack]`. */
 function pushApi(
   repo: { full_name?: string } | Error = {},
-  advertised = 200,
+  advertised: number | [number, number] = 200,
   token = 'ghs_x',
   kv?: KvStore,
 ) {
@@ -308,8 +319,11 @@ function pushApi(
       ? Promise.reject(repo)
       : Promise.resolve({ data: { full_name: 'acme/hub', ...repo } }),
   );
-  const probe = vi.fn((_url: string, _init?: RequestInit) =>
-    Promise.resolve(new Response('refs', { status: advertised })),
+  const [push, pull] = typeof advertised === 'number' ? [advertised, advertised] : advertised;
+  const probe = vi.fn((url: string, _init?: RequestInit) =>
+    Promise.resolve(
+      new Response('refs', { status: url.endsWith('git-receive-pack') ? push : pull }),
+    ),
   );
   vi.stubGlobal('fetch', probe);
   const octokit = { rest: { repos: { get } } };
@@ -317,12 +331,13 @@ function pushApi(
   return { a, get, probe };
 }
 
-describe('appPushableRepo', () => {
+describe('appRepoAccess', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  test('a 200 advertisement means the token may push', async () => {
+  test('a 200 receive-pack advertisement means write', async () => {
     const { a, probe } = pushApi();
-    expect(await a.appPushableRepo('acme', 'hub')).toBe('acme/hub');
+    expect(await a.appRepoAccess('acme', 'hub')).toBe('acme/hub\twrite');
+    expect(probe).toHaveBeenCalledTimes(1);
     expect(probe).toHaveBeenCalledWith(
       'https://github.com/acme/hub.git/info/refs?service=git-receive-pack',
       {
@@ -333,31 +348,50 @@ describe('appPushableRepo', () => {
     );
   });
 
+  test('a contents:read grant — push 403, upload-pack 200 — means read', async () => {
+    const { a, probe } = pushApi({}, [403, 200]);
+    expect(await a.appRepoAccess('acme', 'hub')).toBe('acme/hub\tread');
+    expect(probe.mock.calls[1][0]).toBe(
+      'https://github.com/acme/hub.git/info/refs?service=git-upload-pack',
+    );
+  });
+
   test('probes where a transferred repo lives now, not the namespace asked for', async () => {
     const { a, probe } = pushApi({ full_name: 'projects/hub' });
-    expect(await a.appPushableRepo('acme', 'hub')).toBe('projects/hub');
+    expect(await a.appRepoAccess('acme', 'hub')).toBe('projects/hub\twrite');
     expect(probe.mock.calls[0][0]).toContain('/projects/hub.git/');
   });
 
-  test('403 means the token may not push, public repo included', async () => {
-    const { a } = pushApi({ full_name: 'octocat/Hello-World' }, 403);
-    expect(await a.appPushableRepo('octocat', 'Hello-World')).toBeNull();
+  test('a metadata-only grant (both advertisements 403) is denied', async () => {
+    const { a } = pushApi({}, 403);
+    expect(await a.appRepoAccess('acme', 'hub')).toBeNull();
   });
 
   test('404 means the repo is out of reach', async () => {
     const { a } = pushApi({}, 404);
-    expect(await a.appPushableRepo('acme', 'hub')).toBeNull();
+    expect(await a.appRepoAccess('acme', 'hub')).toBeNull();
+  });
+
+  test('a revoked token (401 advertisement) is denied', async () => {
+    const { a } = pushApi({}, 401);
+    expect(await a.appRepoAccess('acme', 'hub')).toBeNull();
   });
 
   test('a 404 on the repo lookup denies without probing', async () => {
     const { a, probe } = pushApi(Object.assign(new Error('404'), { status: 404 }));
-    expect(await a.appPushableRepo('acme', 'hub')).toBeNull();
+    expect(await a.appRepoAccess('acme', 'hub')).toBeNull();
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  test('a revoked token (401 on the repo lookup) denies without probing', async () => {
+    const { a, probe } = pushApi(Object.assign(new Error('401'), { status: 401 }));
+    expect(await a.appRepoAccess('acme', 'hub')).toBeNull();
     expect(probe).not.toHaveBeenCalled();
   });
 
   test('throws GithubError when the repo lookup fails for another reason', async () => {
     const { a } = pushApi(Object.assign(new Error('500'), { status: 500 }));
-    await expect(a.appPushableRepo('acme', 'hub')).rejects.toMatchObject({
+    await expect(a.appRepoAccess('acme', 'hub')).rejects.toMatchObject({
       code: 'transient',
       status: 500,
     });
@@ -365,7 +399,15 @@ describe('appPushableRepo', () => {
 
   test('throws GithubError on an unexpected advertisement status', async () => {
     const { a } = pushApi({}, 500);
-    await expect(a.appPushableRepo('acme', 'hub')).rejects.toMatchObject({
+    await expect(a.appRepoAccess('acme', 'hub')).rejects.toMatchObject({
+      code: 'transient',
+      status: 500,
+    });
+  });
+
+  test('throws GithubError on an unexpected upload-pack status', async () => {
+    const { a } = pushApi({}, [403, 500]);
+    await expect(a.appRepoAccess('acme', 'hub')).rejects.toMatchObject({
       code: 'transient',
       status: 500,
     });
@@ -516,18 +558,27 @@ describe('cache', () => {
     expect(store.has('alice:acme:access')).toBe(false);
   });
 
-  test('the push proof is cached per repo, on its own suffix and TTL', async () => {
+  test('the access proof is cached per repo, on its own suffix and TTL', async () => {
     const { kv, store, ttls } = fakeKv();
     const { a, get } = pushApi({}, 200, 'ghs_x', kv);
     expect(await a.callerAccess('acme', 'hub', ['acme'])).toBe('write');
     expect(await a.callerAccess('acme', 'hub', ['acme'])).toBe('write');
     expect(get).toHaveBeenCalledTimes(1);
-    const key = `${await sha256hex('ghs_x')}:acme/hub:app-push`;
-    expect(store.get(key)).toBe('acme/hub');
-    expect(ttls.get(key)).toBe(3600);
+    const key = `${await sha256hex('ghs_x')}:acme/hub:app-access`;
+    expect(store.get(key)).toBe('acme/hub\twrite');
+    expect(ttls.get(key)).toBe(300);
   });
 
-  test('an App caller that cannot push re-verifies rather than caching the denial', async () => {
+  test('a read proof is cached and stays read on a hit', async () => {
+    const { kv, store } = fakeKv();
+    const { a, get } = pushApi({}, [403, 200], 'ghs_x', kv);
+    expect(await a.callerAccess('acme', 'hub')).toBe('read');
+    expect(await a.callerAccess('acme', 'hub')).toBe('read');
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(store.get(`${await sha256hex('ghs_x')}:acme/hub:app-access`)).toBe('acme/hub\tread');
+  });
+
+  test('an App caller with no access re-verifies rather than caching the denial', async () => {
     const { kv, store } = fakeKv();
     const { a, get } = pushApi({}, 403, 'ghs_x', kv);
     expect(await a.callerAccess('acme', 'hub', ['acme'])).toBeNull();
@@ -597,7 +648,7 @@ describe('cache', () => {
     expect(await a.repoAccess('acme', 'hub')).toBe('read');
     expect(await a.repoAccess('acme', 'hub')).toBe('read');
     expect(get).toHaveBeenCalledTimes(1);
-    expect(store.has(`${await sha256hex('ghs_x')}:acme/hub:app-push`)).toBe(true);
+    expect(store.has(`${await sha256hex('ghs_x')}:acme/hub:app-access`)).toBe(true);
   });
 
   test('a user token whose login will not resolve still caches, keyed by token hash', async () => {
